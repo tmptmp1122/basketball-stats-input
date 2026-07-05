@@ -326,6 +326,8 @@ if (!window.storage) {
     return DEFAULT_ROSTER.map(p => ({ id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:p.number, name:p.name }));
   }
 
+  const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Vt-qsPfKz9bT5fnaTCVBIyxTxJrAUDqYuokGihV61iM/edit?gid=527910653#gid=527910653";
+
   function freshMeta(date, gameNumber){
     return {
       teamName: "自チーム",
@@ -333,13 +335,28 @@ if (!window.storage) {
       date: date || new Date().toISOString().slice(0,10),
       gameNumber: gameNumber || 1,
       venue: "",
-      sheetUrl: "",
+      sheetUrl: DEFAULT_SHEET_URL,
       roster: makeDefaultRoster(),
-      onCourt: [null,null,null,null,null],
+      onCourtByQuarter: { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] },
       quarter: 1,
       opponent: {1:0,2:0,3:0,4:0},
       updatedAt: Date.now()
     };
+  }
+
+  // Each quarter remembers its own starting five independently — switching
+  // quarters doesn't wipe or carry over the lineup, it just shows that
+  // quarter's own (initially empty) selection.
+  function currentOnCourt(){
+    if(!meta.onCourtByQuarter) migrateOnCourt();
+    return meta.onCourtByQuarter[meta.quarter];
+  }
+  function migrateOnCourt(){
+    // Back-compat for games saved before per-quarter lineups existed.
+    const legacy = meta.onCourt || [null,null,null,null,null];
+    meta.onCourtByQuarter = { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] };
+    meta.onCourtByQuarter[meta.quarter] = legacy;
+    delete meta.onCourt;
   }
 
   // Personal (non-shared) storage — scoped to this person only, no room code needed.
@@ -397,10 +414,12 @@ if (!window.storage) {
       meta = m || freshMeta();
       evState = ev || { events: [], updatedAt: 0 };
     }
-    if(meta.sheetUrl === undefined) meta.sheetUrl = "";
+    if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
+    if(!meta.onCourtByQuarter) migrateOnCourt();
     ready = true;
     tab = meta.roster.length ? "game" : "setup";
+    saveMeta();
     render();
   }
 
@@ -421,13 +440,14 @@ if (!window.storage) {
     try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
     meta = m || freshMeta();
-    if(meta.sheetUrl === undefined) meta.sheetUrl = "";
+    if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
+    if(!meta.onCourtByQuarter) migrateOnCourt();
     evState = ev || { events: [], updatedAt: 0 };
     gameIndex.currentGameId = id;
     selectedPlayer = null;
     modal = null;
-    await saveIndex();
+    await saveMeta();
     render();
     toast(`「${gameLabel(meta)}」に切り替えました`);
   }
@@ -462,6 +482,38 @@ if (!window.storage) {
       await saveIndex();
       render();
     }
+  }
+
+  // Wipes every game's data from this device/browser and starts over with a
+  // single brand-new game. Used by the "全データを一括削除" button in Setup.
+  // Wipes every game's data (scores, records, game history) from this device,
+  // but keeps the player roster (number + name) so it doesn't need re-entering.
+  async function clearAllData(){
+    const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
+
+    for(const g of gameIndex.games){
+      try{ await window.storage.delete(gameMetaKey(g.id), false); }catch(e){ /* ignore */ }
+      try{ await window.storage.delete(gameEvKey(g.id), false); }catch(e){ /* ignore */ }
+    }
+    try{ await window.storage.delete(INDEX_KEY, false); }catch(e){ /* ignore */ }
+    try{ await window.storage.delete(LEGACY_META_KEY, false); }catch(e){ /* ignore */ }
+    try{ await window.storage.delete(LEGACY_EV_KEY, false); }catch(e){ /* ignore */ }
+
+    const id = newGameId();
+    meta = freshMeta();
+    meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
+    evState = { events: [], updatedAt: 0 };
+    gameIndex = { currentGameId: id, games: [] };
+    syncIndexEntry();
+    selectedPlayer = null;
+    modal = null;
+    try{ await window.storage.set(gameMetaKey(id), JSON.stringify(meta), false); }catch(e){ console.error(e); }
+    try{ await window.storage.set(gameEvKey(id), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+    await saveIndex();
+    ready = true;
+    tab = meta.roster.length ? "game" : "setup";
+    render();
+    toast("選手登録は残したまま、その他のデータを削除しました");
   }
 
   // ---------- stat helpers ----------
@@ -626,7 +678,8 @@ if (!window.storage) {
   }
   function deletePlayer(id){
     meta.roster = meta.roster.filter(p=>p.id!==id);
-    meta.onCourt = meta.onCourt.map(x => x===id ? null : x);
+    if(!meta.onCourtByQuarter) migrateOnCourt();
+    [1,2,3,4].forEach(q => { meta.onCourtByQuarter[q] = meta.onCourtByQuarter[q].map(x => x===id ? null : x); });
     saveMeta(); render();
   }
   function updatePlayer(id, number, name){
@@ -637,8 +690,10 @@ if (!window.storage) {
     saveMeta(); render();
   }
   function setOnCourt(slotIdx, playerId){
-    meta.onCourt = meta.onCourt.map((x,i) => (i!==slotIdx && x===playerId) ? null : x);
-    meta.onCourt[slotIdx] = playerId;
+    const arr = currentOnCourt();
+    const updated = arr.map((x,i) => (i!==slotIdx && x===playerId) ? null : x);
+    updated[slotIdx] = playerId;
+    meta.onCourtByQuarter[meta.quarter] = updated;
     if(playerId){
       ensurePresence(playerId, meta.quarter);
       logCourtSlot(slotIdx, playerId, meta.quarter);
@@ -650,8 +705,9 @@ if (!window.storage) {
   // for that slot, so playing-time splits aren't thrown off by the correction.
   function removeFromCourt(slotIdx){
     const q = meta.quarter;
-    const pid = meta.onCourt[slotIdx];
-    meta.onCourt[slotIdx] = null;
+    const arr = currentOnCourt();
+    const pid = arr[slotIdx];
+    arr[slotIdx] = null;
     evState.events = evState.events.filter(e => !(e.type==="courtslot" && e.slot===slotIdx && e.quarter===q));
     if(selectedPlayer === pid) selectedPlayer = null;
     saveMeta(); saveEvents(); render();
@@ -659,10 +715,9 @@ if (!window.storage) {
   }
   function setQuarter(q){
     meta.quarter = q;
-    meta.onCourt.forEach((pid, slotIdx) => {
-      if(pid){ ensurePresence(pid, q); logCourtSlot(slotIdx, pid, q); }
-    });
-    saveMeta(); saveEvents(); render();
+    if(!meta.onCourtByQuarter) migrateOnCourt();
+    selectedPlayer = null;
+    saveMeta(); render();
   }
   function addOpponentPts(q, pts){
     meta.opponent[q] = Math.max(0, (meta.opponent[q]||0) + pts);
@@ -799,7 +854,7 @@ if (!window.storage) {
       <div class="bb-header">
         <div class="bb-header-top">
           <div class="bb-title bb-display">🏀 STAT KEEPER</div>
-          <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合</div>
+          <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
         </div>
         <div class="bb-scorebug">
           <div class="bb-team-block">
@@ -856,7 +911,7 @@ if (!window.storage) {
         <input class="bb-input" id="bbTeamName" value="${esc(meta.teamName)}" style="margin-bottom:10px;"/>
         <span class="bb-label">対戦相手名</span>
         <input class="bb-input" id="bbOppName" value="${esc(meta.opponentName)}" style="margin-bottom:10px;"/>
-        <span class="bb-label">この試合を貼り付けるGoogleスプレッドシートのURL（任意）</span>
+        <span class="bb-label">STATSシートのURL</span>
         <input class="bb-input" id="bbSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." value="${esc(meta.sheetUrl)}"/>
       </div>
 
@@ -878,6 +933,12 @@ if (!window.storage) {
               <button class="bb-icon-btn del" data-del="${p.id}">✕</button>
             </div>`).join("")
         }
+      </div>
+
+      <div class="bb-section-title">この端末のデータ</div>
+      <div class="bb-card">
+        <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:10px;">すべての試合・記録・スタッツをこの端末から削除します（<b>選手登録は残ります</b>）。大事な記録は先にスプレッドシートにコピーしておいてください。</div>
+        <button class="bb-btn danger" id="bbClearAll" style="width:100%;">全データを一括削除（選手登録は残す）</button>
       </div>`;
   }
 
@@ -885,7 +946,7 @@ if (!window.storage) {
     if(meta.roster.length===0){
       return `<div class="bb-empty">まず「設定」タブで選手を登録してください</div>`;
     }
-    const onCourt = meta.onCourt;
+    const onCourt = currentOnCourt();
     const courtTiles = onCourt.map((pid, idx) => {
       if(!pid){
         return `<div class="bb-tile empty" data-slot="${idx}" data-empty="1">＋ 選手を選択</div>`;
@@ -948,7 +1009,7 @@ if (!window.storage) {
   function renderModal(){
     if(!modal) return "";
     if(modal.type === "sub"){
-      const onCourt = meta.onCourt;
+      const onCourt = currentOnCourt();
       const benchIds = meta.roster.filter(p=>!onCourt.includes(p.id));
       const benchHtml = benchIds.length===0 ? '<div class="bb-empty">ベンチに選手がいません</div>' :
         benchIds.map(p=>{
@@ -1079,7 +1140,7 @@ if (!window.storage) {
         </div>`;
     }
     if(modal.type === "confirmRemoveCourt"){
-      const pid = meta.onCourt[modal.slot];
+      const pid = currentOnCourt()[modal.slot];
       const p = pid ? playerName(pid) : null;
       const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
       return `
@@ -1148,6 +1209,21 @@ if (!window.storage) {
             </div>
             <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
             <button class="bb-btn" id="bbCreateGame" style="width:100%;">この内容で作成</button>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmClearAll"){
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>全データを削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              この端末に保存されている<b>すべての試合・記録・スタッツ</b>が削除されます。<b>選手登録（背番号・名前）は残ります。</b>この操作は取り消せません。大事な記録は先にスプレッドシートへコピーしておいてください。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelClearAll" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmClearAll" style="flex:1;">すべて削除する</button>
+            </div>
           </div>
         </div>`;
     }
@@ -1275,6 +1351,8 @@ if (!window.storage) {
       if(openSwitch) openSwitch.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
       const newGameBtn = document.getElementById("bbNewGame");
       if(newGameBtn) newGameBtn.addEventListener("click", ()=>{ modal = {type:"newGame"}; render(); });
+      const clearAllBtn = document.getElementById("bbClearAll");
+      if(clearAllBtn) clearAllBtn.addEventListener("click", ()=>{ modal = {type:"confirmClearAll"}; render(); });
     }
 
     if(tab==="game"){
@@ -1430,6 +1508,15 @@ if (!window.storage) {
           const num = Math.max(1, Number(document.getElementById("bbNewGameNumber").value)||1);
           modal = null;
           createNewGame(date, num);
+        });
+      }
+      if(modal.type === "confirmClearAll"){
+        const cancelBtn = document.getElementById("bbCancelClearAll");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmClearAll");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          modal = null;
+          clearAllData();
         });
       }
       if(modal.type === "opponent"){
