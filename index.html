@@ -1269,6 +1269,12 @@ if (!window.storage) {
 
   function renderActionBar(){
     if(meta.roster.length===0) return "";
+    // Guard against a stale selection (e.g. the selected player was just
+    // substituted out, deleted, or the quarter changed) — treat as unselected
+    // rather than silently letting records attach to someone no longer on court.
+    if(selectedPlayer && selectedPlayer !== OWNGOAL_ID && !currentOnCourt().includes(selectedPlayer)){
+      selectedPlayer = null;
+    }
     const p = selectedPlayer ? playerName(selectedPlayer) : null;
     const disabled = selectedPlayer ? "" : "disabled";
     const hasEvents = evState.events.some(e=>e.type!=="presence");
@@ -1478,7 +1484,9 @@ if (!window.storage) {
         document.querySelectorAll("[data-bench]").forEach(el=>{
           el.addEventListener("click", ()=>{
             const slot = modal.slot, pid = el.getAttribute("data-bench");
+            const outgoing = currentOnCourt()[slot];
             modal = null;
+            if(selectedPlayer === outgoing) selectedPlayer = null;
             setOnCourt(slot, pid);
           });
         });
