@@ -330,7 +330,7 @@ if (!window.storage) {
 
   function freshMeta(date, gameNumber){
     return {
-      teamName: "自チーム",
+      teamName: "B☆Bキッズ",
       opponentName: "対戦相手",
       date: date || new Date().toISOString().slice(0,10),
       gameNumber: gameNumber || 1,
@@ -415,6 +415,7 @@ if (!window.storage) {
       evState = ev || { events: [], updatedAt: 0 };
     }
     if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
+    if(meta.teamName === "自チーム") meta.teamName = "B☆Bキッズ";
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
     if(!meta.onCourtByQuarter) migrateOnCourt();
     ready = true;
@@ -441,6 +442,7 @@ if (!window.storage) {
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
     meta = m || freshMeta();
     if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
+    if(meta.teamName === "自チーム") meta.teamName = "B☆Bキッズ";
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
     if(!meta.onCourtByQuarter) migrateOnCourt();
     evState = ev || { events: [], updatedAt: 0 };
