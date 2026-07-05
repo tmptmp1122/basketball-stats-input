@@ -128,6 +128,9 @@
   }
   .bb-icon-btn.del{color:var(--whistle);}
   .bb-icon-btn.edit{color:var(--maple-bright);}
+  .bb-reorder-col{display:flex; flex-direction:column; gap:2px; margin-right:2px;}
+  .bb-icon-btn.reorder{font-size:11px; padding:2px 6px; color:var(--chalk-dim); line-height:1;}
+  .bb-icon-btn.reorder[disabled]{opacity:0.25; cursor:default;}
 
   /* on court tiles */
   .bb-court-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px;}
@@ -691,6 +694,15 @@ if (!window.storage) {
     if(name.trim()) p.name = name.trim();
     saveMeta(); render();
   }
+  function movePlayer(id, direction){
+    const i = meta.roster.findIndex(p=>p.id===id);
+    if(i < 0) return;
+    const j = direction === "up" ? i-1 : i+1;
+    if(j < 0 || j >= meta.roster.length) return;
+    const arr = meta.roster;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    saveMeta(); render();
+  }
   function setOnCourt(slotIdx, playerId){
     const arr = currentOnCourt();
     const updated = arr.map((x,i) => (i!==slotIdx && x===playerId) ? null : x);
@@ -869,9 +881,6 @@ if (!window.storage) {
             <div class="bb-score bb-mono">${opp}</div>
           </div>
         </div>
-        <div class="bb-qtr-row">
-          ${[1,2,3,4].map(q => `<button class="bb-qtr-btn ${meta.quarter===q?'active':''}" data-q="${q}">${q}Q</button>`).join("")}
-        </div>
       </div>`;
   }
 
@@ -927,8 +936,12 @@ if (!window.storage) {
       </div>
       <div class="bb-card" style="padding:4px 12px;">
         ${ meta.roster.length===0 ? '<div class="bb-empty">まだ選手が登録されていません</div>' :
-          meta.roster.map(p=>`
+          meta.roster.map((p,i)=>`
             <div class="bb-player-row">
+              <div class="bb-reorder-col">
+                <button class="bb-icon-btn reorder" data-move-up="${p.id}" ${i===0?"disabled":""}>▲</button>
+                <button class="bb-icon-btn reorder" data-move-down="${p.id}" ${i===meta.roster.length-1?"disabled":""}>▼</button>
+              </div>
               <div class="bb-num-badge">${esc(p.number)}</div>
               <div class="bb-player-name">${esc(p.name)}</div>
               <button class="bb-icon-btn edit" data-edit="${p.id}">✎</button>
@@ -936,6 +949,7 @@ if (!window.storage) {
             </div>`).join("")
         }
       </div>
+      <div style="font-size:11px; color:var(--chalk-dim); margin-top:6px; margin-bottom:10px;">▲▼ で並び順を変更できます（スプレッドシートの行順に対応）。変更時は確認画面が出ます。</div>
 
       <div class="bb-section-title">この端末のデータ</div>
       <div class="bb-card">
@@ -971,6 +985,9 @@ if (!window.storage) {
     const ogSel = selectedPlayer===OWNGOAL_ID ? "selected" : "";
 
     return `
+      <div class="bb-qtr-row" style="margin-top:0; margin-bottom:8px;">
+        ${[1,2,3,4].map(q => `<button class="bb-qtr-btn ${meta.quarter===q?'active':''}" data-q="${q}">${q}Q</button>`).join("")}
+      </div>
       <div class="bb-game-toolbar">
         <button class="bb-chip-btn" id="bbOpenOpp">相手チーム 得点 (計${oppTotalScore()})</button>
         <button class="bb-chip-btn" id="bbOpenLog">記録一覧・訂正（${logCount}件）</button>
@@ -1137,6 +1154,24 @@ if (!window.storage) {
             <div class="bb-row" style="gap:8px;">
               <button class="bb-btn secondary" id="bbCancelDelete" style="flex:1;">キャンセル</button>
               <button class="bb-btn danger" id="bbConfirmDelete" style="flex:1;">削除する</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmReorder"){
+      const p = meta.roster.find(pl=>pl.id===modal.playerId);
+      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+      const dirLabel = modal.direction === "up" ? "1つ上" : "1つ下";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>並び順を変更しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              ${name} を${dirLabel}に移動します。並び順はスプレッドシートに貼り付ける行の順番に対応しています。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelReorder" style="flex:1;">キャンセル</button>
+              <button class="bb-btn" id="bbConfirmReorder" style="flex:1;">移動する</button>
             </div>
           </div>
         </div>`;
@@ -1349,6 +1384,12 @@ if (!window.storage) {
       document.querySelectorAll("[data-edit]").forEach(el=>{
         el.addEventListener("click", ()=>{ modal = {type:"editPlayer", playerId: el.getAttribute("data-edit")}; render(); });
       });
+      document.querySelectorAll("[data-move-up]").forEach(el=>{
+        el.addEventListener("click", ()=>{ modal = {type:"confirmReorder", playerId: el.getAttribute("data-move-up"), direction:"up"}; render(); });
+      });
+      document.querySelectorAll("[data-move-down]").forEach(el=>{
+        el.addEventListener("click", ()=>{ modal = {type:"confirmReorder", playerId: el.getAttribute("data-move-down"), direction:"down"}; render(); });
+      });
       const openSwitch = document.getElementById("bbOpenGameSwitch");
       if(openSwitch) openSwitch.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
       const newGameBtn = document.getElementById("bbNewGame");
@@ -1465,6 +1506,16 @@ if (!window.storage) {
           const id = modal.playerId;
           modal = null;
           deletePlayer(id);
+        });
+      }
+      if(modal.type === "confirmReorder"){
+        const cancelBtn = document.getElementById("bbCancelReorder");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmReorder");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const id = modal.playerId, direction = modal.direction;
+          modal = null;
+          movePlayer(id, direction);
         });
       }
       if(modal.type === "confirmRemoveCourt"){
