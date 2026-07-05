@@ -1,0 +1,1495 @@
+<style>
+  :root{
+    --ink:#122029;
+    --panel:#1b2e3a;
+    --panel2:#223a49;
+    --line:rgba(244,239,228,0.12);
+    --chalk:#F4EFE4;
+    --chalk-dim:#B9C3C6;
+    --maple:#C98A4B;
+    --maple-bright:#E3A662;
+    --net:#3FA67A;
+    --net-dim:#274a3d;
+    --whistle:#D8483A;
+    --whistle-dim:#4a2a26;
+    --gold:#E8B84B;
+    --radius:14px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  #bb-app{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--ink);
+    color:var(--chalk);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    max-width:720px;
+    margin:0 auto;
+    position:relative;
+  }
+  /* Used only for the live "game" tab so it fits one screen without scrolling.
+     Other tabs (setup/stats) use normal page flow so long lists scroll naturally
+     with the page, which is more reliable across host environments. */
+  #bb-app.bb-fixed{
+    height:100dvh;
+    height:100vh;
+    overflow:hidden;
+  }
+  #bb-app.bb-fixed .bb-body{ overflow-y:auto; }
+  #bb-app:not(.bb-fixed) .bb-body{ overflow:visible; }
+  .bb-display{
+    font-family:"Arial Narrow",Arial,sans-serif;
+    font-weight:800;
+    letter-spacing:0.02em;
+    text-transform:uppercase;
+  }
+  .bb-mono{
+    font-variant-numeric:tabular-nums;
+    font-family:"Courier New",monospace;
+    font-weight:700;
+  }
+  .bb-header{
+    padding:8px 14px 8px;
+    background:linear-gradient(180deg,#16262f,var(--ink));
+    border-bottom:2px solid var(--maple);
+    flex-shrink:0;
+  }
+  .bb-header-top{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .bb-title{font-size:13px; letter-spacing:0.08em; color:var(--maple-bright);}
+  .bb-scorebug{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:4px; padding:2px 4px;
+  }
+  .bb-team-block{flex:1; text-align:center;}
+  .bb-team-name{font-size:11px; color:var(--chalk-dim); margin-bottom:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .bb-score{font-size:28px; line-height:1;}
+  .bb-score.us{color:var(--gold);}
+  .bb-vs{font-size:10px; color:var(--chalk-dim); padding:0 8px;}
+  .bb-qtr-row{display:flex; gap:6px; margin-top:6px;}
+  .bb-qtr-btn{
+    flex:1; padding:6px 0; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--chalk-dim); font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .bb-qtr-btn.active{background:var(--maple); color:#1b1105; border-color:var(--maple);}
+
+  .bb-tabs{
+    display:flex; background:var(--panel); border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .bb-tab{
+    flex:1; text-align:center; padding:8px 0; font-size:13px; color:var(--chalk-dim);
+    cursor:pointer; border-bottom:3px solid transparent; font-weight:700;
+  }
+  .bb-tab.active{color:var(--chalk); border-bottom-color:var(--maple);}
+
+  .bb-body{flex:1; min-height:0; overflow-y:auto; padding:10px 12px;}
+  .bb-body.no-pad-bottom{padding-bottom:6px;}
+  .bb-section-title{font-size:12px; color:var(--maple-bright); letter-spacing:0.08em; margin:18px 0 8px; text-transform:uppercase;}
+  .bb-section-title:first-child{margin-top:0;}
+
+  .bb-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:10px;}
+  .bb-row{display:flex; gap:8px; align-items:center;}
+  .bb-input{
+    flex:1; background:var(--ink); border:1px solid var(--line); color:var(--chalk);
+    padding:10px; border-radius:10px; font-size:15px; min-width:0;
+  }
+  .bb-input:focus{outline:2px solid var(--maple); border-color:var(--maple);}
+  .bb-label{font-size:11px; color:var(--chalk-dim); margin-bottom:4px; display:block;}
+  .bb-btn{
+    background:var(--maple); color:#1b1105; border:none; padding:10px 16px; border-radius:10px;
+    font-weight:800; font-size:14px; cursor:pointer; white-space:nowrap;
+  }
+  .bb-btn.secondary{background:var(--panel2); color:var(--chalk); border:1px solid var(--line);}
+  .bb-btn.danger{background:var(--whistle); color:#fff;}
+  .bb-btn:active{transform:scale(0.96);}
+  .bb-btn[disabled]{opacity:0.4;}
+
+  .bb-player-row{
+    display:flex; align-items:center; gap:10px; padding:9px 8px; border-bottom:1px solid var(--line);
+  }
+  .bb-player-row:last-child{border-bottom:none;}
+  .bb-num-badge{
+    width:34px; height:34px; border-radius:50%; background:var(--panel2); color:var(--gold);
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0;
+    border:1px solid var(--line);
+  }
+  .bb-player-name{flex:1; font-size:15px;}
+  .bb-icon-btn{
+    background:none; border:none; color:var(--chalk-dim); font-size:18px; cursor:pointer; padding:4px 8px;
+  }
+  .bb-icon-btn.del{color:var(--whistle);}
+  .bb-icon-btn.edit{color:var(--maple-bright);}
+
+  /* on court tiles */
+  .bb-court-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px;}
+  .bb-tile{
+    background:var(--panel); border:2px solid var(--line); border-radius:12px;
+    padding:8px 6px 16px; text-align:center; cursor:pointer; position:relative; min-height:70px;
+    display:flex; flex-direction:column; justify-content:center;
+  }
+  .bb-tile.selected{border-color:var(--gold); background:var(--panel2); box-shadow:0 0 0 1px var(--gold);}
+  .bb-tile.empty{border-style:dashed; color:var(--chalk-dim); cursor:default; font-size:12px;}
+  .bb-tile-num{font-size:10px; color:var(--maple-bright); font-weight:800;}
+  .bb-tile-name{font-size:14px; margin:1px 0; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .bb-tile-pts{font-size:11px; color:var(--chalk-dim);}
+  .bb-tile-sub{
+    position:absolute; top:3px; right:3px;
+    background:var(--panel2); border:1px solid var(--line);
+    color:var(--chalk-dim); font-size:9px; border-radius:8px; padding:2px 5px; cursor:pointer;
+  }
+  .bb-tile-remove{
+    position:absolute; bottom:3px; left:3px;
+    background:var(--whistle-dim); border:1px solid var(--whistle);
+    color:var(--whistle); font-size:9px; border-radius:8px; padding:2px 5px; cursor:pointer;
+  }
+  .bb-bench-list{display:flex; flex-wrap:wrap; gap:8px;}
+  .bb-bench-chip{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 12px;
+    font-size:13px; cursor:pointer;
+  }
+  .bb-bench-chip:active{background:var(--panel2);}
+
+  .bb-game-toolbar{display:flex; gap:8px; margin-bottom:8px;}
+  .bb-chip-btn{
+    flex:1; background:var(--panel); border:1px solid var(--line); color:var(--chalk-dim);
+    border-radius:10px; padding:7px 8px; font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .bb-chip-btn:active{background:var(--panel2);}
+
+  /* modal */
+  .bb-modal-overlay{
+    position:fixed; inset:0; background:rgba(8,14,18,0.6); z-index:40;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .bb-modal{
+    background:var(--panel); width:100%; max-width:720px; max-height:82vh; overflow-y:auto;
+    border-radius:16px 16px 0 0; padding:14px 14px calc(14px + env(safe-area-inset-bottom));
+    border-top:2px solid var(--maple);
+  }
+  .bb-modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
+  .bb-modal-head h3{margin:0; font-size:14px; color:var(--maple-bright);}
+  .bb-modal-close{background:none; border:none; color:var(--chalk-dim); font-size:20px; cursor:pointer;}
+
+  .bb-edit-row{border-bottom:1px solid var(--line); padding:8px 0;}
+  .bb-edit-row-top{display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--chalk-dim); margin-bottom:6px;}
+  .bb-edit-row-controls{display:flex; gap:6px;}
+  .bb-edit-select{
+    flex:1; background:var(--ink); color:var(--chalk); border:1px solid var(--line); border-radius:8px;
+    padding:7px 4px; font-size:13px; min-width:0;
+  }
+  .bb-edit-del{background:var(--whistle); color:#fff; border:none; border-radius:8px; padding:0 12px; font-size:14px; cursor:pointer;}
+
+  /* action bar */
+  .bb-actionbar{
+    flex-shrink:0; background:var(--panel); border-top:2px solid var(--maple);
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+  .bb-actionbar-who{font-size:12px; margin-bottom:6px; color:var(--chalk-dim); display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .bb-actionbar-who b{color:var(--gold); font-size:14px;}
+  .bb-undo-btn{
+    background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle);
+    border-radius:8px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;
+  }
+  .bb-undo-btn[disabled]{opacity:0.35; cursor:default;}
+  .bb-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:5px;}
+  .bb-stat-btn{
+    padding:10px 0; border-radius:9px; border:none; font-weight:800; font-size:13px; cursor:pointer; color:#fff;
+  }
+  .bb-stat-btn.make{background:var(--net);}
+  .bb-stat-btn.miss{background:var(--whistle);}
+  .bb-stat-btn.neutral{background:var(--panel2); color:var(--chalk); border:1px solid var(--line);}
+  .bb-stat-btn.foul{background:#8a5a20;}
+  .bb-stat-btn.ft{background:var(--gold); color:#2a1d05;}
+  .bb-stat-btn:active{transform:scale(0.95);}
+  .bb-stat-btn[disabled]{opacity:0.35;}
+
+  .bb-live-log-panel{
+    flex-shrink:0; background:var(--ink); border-top:1px solid var(--line);
+    padding:6px 12px calc(6px + env(safe-area-inset-bottom));
+    max-height:16vh;
+    display:flex; flex-direction:column;
+  }
+  .bb-live-log-title{font-size:10px; color:var(--chalk-dim); letter-spacing:0.06em; margin-bottom:2px; flex-shrink:0;}
+  .bb-live-log{
+    flex:1; overflow-y:auto; min-height:0;
+  }
+  .bb-live-log-item{
+    display:flex; align-items:baseline; gap:8px; font-size:12px; padding:4px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .bb-live-log-item:last-child{border-bottom:none;}
+  .bb-live-log-time{color:var(--chalk-dim); font-variant-numeric:tabular-nums; flex-shrink:0; font-size:11px;}
+  .bb-live-log-who{color:var(--gold); font-weight:700; flex-shrink:0;}
+  .bb-live-log-what{color:var(--chalk); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+  /* stats table */
+  .bb-table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius);}
+  table.bb-stats{border-collapse:collapse; width:100%; font-size:12px; white-space:nowrap;}
+  table.bb-stats th, table.bb-stats td{padding:7px 8px; text-align:center; border-bottom:1px solid var(--line);}
+  table.bb-stats th{background:var(--panel2); color:var(--maple-bright); font-weight:700; position:sticky; top:0;}
+  table.bb-stats td:nth-child(2){text-align:left;}
+  table.bb-stats tr:last-child td{font-weight:800; background:var(--panel2);}
+
+  .bb-empty{text-align:center; color:var(--chalk-dim); padding:30px 10px; font-size:13px;}
+  .bb-toast{
+    position:fixed; bottom:90px; left:50%; transform:translateX(-50%); background:var(--net); color:#08251a;
+    padding:9px 18px; border-radius:20px; font-size:13px; font-weight:700; z-index:50; opacity:0; transition:opacity .25s;
+    pointer-events:none;
+  }
+  .bb-toast.show{opacity:1;}
+</style>
+
+<div id="bb-app">
+  <div class="bb-toast" id="bbToast"></div>
+  <div id="bbRoot"></div>
+</div>
+
+<script>
+// --- Standalone shim: this file is meant to be hosted outside Claude (e.g. GitHub
+// Pages, Netlify). window.storage only exists inside Claude's artifact sandbox, so
+// this polyfills the same interface using the browser's normal localStorage.
+// Note: unlike Claude's storage, this data stays on THIS device/browser only —
+// it does not sync across devices or accounts.
+if (!window.storage) {
+  window.storage = {
+    async get(key, shared) {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return null;
+      return { key, value: raw, shared: !!shared };
+    },
+    async set(key, value, shared) {
+      localStorage.setItem(key, value);
+      return { key, value, shared: !!shared };
+    },
+    async delete(key, shared) {
+      const existed = localStorage.getItem(key) !== null;
+      localStorage.removeItem(key);
+      return { key, deleted: existed, shared: !!shared };
+    },
+    async list(prefix, shared) {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!prefix || (k && k.startsWith(prefix))) keys.push(k);
+      }
+      return { keys, prefix, shared: !!shared };
+    }
+  };
+}
+</script>
+<script>
+(function(){
+  "use strict";
+
+  // ---------- helpers ----------
+  let evCounter = 0;
+  function newEventId(){ return "e" + (evCounter++) + "-" + Date.now(); }
+  function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function toast(msg){
+    const t = document.getElementById("bbToast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(()=>t.classList.remove("show"), 1600);
+  }
+
+  // ---------- app state ----------
+  let ready = false;         // true once personal data has loaded
+  let tab = "setup";         // setup | game | stats
+  let modal = null;          // {type:'sub', slot} | {type:'opponent'} | {type:'log'} | null
+  let selectedPlayer = null; // player id selected for stat entry
+
+  let gameIndex = { currentGameId: null, games: [] }; // games: [{id,date,gameNumber,teamName,opponentName,updatedAt}]
+  let meta = null;    // {teamName,opponentName,date,gameNumber,venue,sheetUrl,roster:[],onCourt:[5],quarter,opponent:{1:0,2:0,3:0,4:0},updatedAt}
+  let evState = { events: [], updatedAt: 0 };
+
+  // Pre-registered roster used whenever a new game is created.
+  const DEFAULT_ROSTER = [
+    {number:"4", name:"きすけ"}, {number:"5", name:"たくみ"}, {number:"6", name:"たくま"},
+    {number:"7", name:"りゅうま"}, {number:"8", name:"ゆうき"}, {number:"9", name:"きょうすけ"},
+    {number:"10", name:"ことし"}, {number:"11", name:"とく"}, {number:"12", name:"そうじろう"},
+    {number:"13", name:"ともひと"}, {number:"14", name:"じん"}, {number:"15", name:"りきと"},
+    {number:"75", name:"きよなり"}, {number:"16", name:"りゅうせい"}, {number:"48", name:"わたる"},
+    {number:"17", name:"しょうご"}, {number:"25", name:"とうご"}, {number:"33", name:"あおい"},
+    {number:"73", name:"かいち"}, {number:"40", name:"あきおみ"}, {number:"70", name:"いっけい"}
+  ];
+  function makeDefaultRoster(){
+    return DEFAULT_ROSTER.map(p => ({ id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:p.number, name:p.name }));
+  }
+
+  function freshMeta(date, gameNumber){
+    return {
+      teamName: "自チーム",
+      opponentName: "対戦相手",
+      date: date || new Date().toISOString().slice(0,10),
+      gameNumber: gameNumber || 1,
+      venue: "",
+      sheetUrl: "",
+      roster: makeDefaultRoster(),
+      onCourt: [null,null,null,null,null],
+      quarter: 1,
+      opponent: {1:0,2:0,3:0,4:0},
+      updatedAt: Date.now()
+    };
+  }
+
+  // Personal (non-shared) storage — scoped to this person only, no room code needed.
+  // One index lists every game (date + game number); each game's own meta/events
+  // are stored under their own keys so switching games is just loading a new pair.
+  const INDEX_KEY = "bb-solo-index";
+  const LEGACY_META_KEY = "bb-solo-meta";   // pre-multi-game format, migrated on first load
+  const LEGACY_EV_KEY = "bb-solo-events";
+  function gameMetaKey(id){ return "bb-solo-game-" + id + "-meta"; }
+  function gameEvKey(id){ return "bb-solo-game-" + id + "-events"; }
+  function newGameId(){ return "g" + Date.now() + Math.random().toString(36).slice(2,7); }
+
+  function gameLabel(g){
+    return `${g.date || ""} 第${g.gameNumber||1}試合${g.opponentName ? " vs "+g.opponentName : ""}`;
+  }
+
+  async function saveIndex(){
+    try{ await window.storage.set(INDEX_KEY, JSON.stringify(gameIndex), false); }catch(e){ console.error(e); }
+  }
+
+  function syncIndexEntry(){
+    const entry = { id: gameIndex.currentGameId, date: meta.date, gameNumber: meta.gameNumber, teamName: meta.teamName, opponentName: meta.opponentName, updatedAt: meta.updatedAt };
+    const i = gameIndex.games.findIndex(g => g.id === entry.id);
+    if(i >= 0) gameIndex.games[i] = entry; else gameIndex.games.push(entry);
+  }
+
+  async function loadApp(){
+    let idx = null;
+    try{ const res = await window.storage.get(INDEX_KEY, false); idx = res ? JSON.parse(res.value) : null; }catch(e){ idx = null; }
+
+    if(!idx){
+      // First time on the new multi-game format: migrate legacy single-game data if present.
+      let legacyMeta = null, legacyEv = null;
+      try{ const res = await window.storage.get(LEGACY_META_KEY, false); legacyMeta = res ? JSON.parse(res.value) : null; }catch(e){ legacyMeta = null; }
+      try{ const res = await window.storage.get(LEGACY_EV_KEY, false); legacyEv = res ? JSON.parse(res.value) : null; }catch(e){ legacyEv = null; }
+      const id = newGameId();
+      if(legacyMeta){
+        if(legacyMeta.gameNumber === undefined) legacyMeta.gameNumber = 1;
+        meta = legacyMeta;
+        evState = legacyEv || { events: [], updatedAt: 0 };
+      }else{
+        meta = freshMeta();
+        evState = { events: [], updatedAt: 0 };
+      }
+      gameIndex = { currentGameId: id, games: [] };
+      syncIndexEntry();
+      await window.storage.set(gameMetaKey(id), JSON.stringify(meta), false);
+      await window.storage.set(gameEvKey(id), JSON.stringify(evState), false);
+      await saveIndex();
+    }else{
+      gameIndex = idx;
+      let m = null, ev = null;
+      try{ const res = await window.storage.get(gameMetaKey(gameIndex.currentGameId), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
+      try{ const res = await window.storage.get(gameEvKey(gameIndex.currentGameId), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
+      meta = m || freshMeta();
+      evState = ev || { events: [], updatedAt: 0 };
+    }
+    if(meta.sheetUrl === undefined) meta.sheetUrl = "";
+    if(meta.gameNumber === undefined) meta.gameNumber = 1;
+    ready = true;
+    tab = meta.roster.length ? "game" : "setup";
+    render();
+  }
+
+  async function saveMeta(){
+    meta.updatedAt = Date.now();
+    syncIndexEntry();
+    try{ await window.storage.set(gameMetaKey(gameIndex.currentGameId), JSON.stringify(meta), false); }catch(e){ console.error(e); }
+    saveIndex();
+  }
+  async function saveEvents(){
+    evState.updatedAt = Date.now();
+    try{ await window.storage.set(gameEvKey(gameIndex.currentGameId), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+  }
+
+  async function switchToGame(id){
+    if(id === gameIndex.currentGameId) return;
+    let m = null, ev = null;
+    try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
+    try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
+    meta = m || freshMeta();
+    if(meta.sheetUrl === undefined) meta.sheetUrl = "";
+    if(meta.gameNumber === undefined) meta.gameNumber = 1;
+    evState = ev || { events: [], updatedAt: 0 };
+    gameIndex.currentGameId = id;
+    selectedPlayer = null;
+    modal = null;
+    await saveIndex();
+    render();
+    toast(`「${gameLabel(meta)}」に切り替えました`);
+  }
+
+  async function createNewGame(date, gameNumber){
+    const id = newGameId();
+    meta = freshMeta(date, gameNumber);
+    evState = { events: [], updatedAt: 0 };
+    gameIndex.currentGameId = id;
+    syncIndexEntry();
+    selectedPlayer = null;
+    modal = null;
+    try{ await window.storage.set(gameMetaKey(id), JSON.stringify(meta), false); }catch(e){ console.error(e); }
+    try{ await window.storage.set(gameEvKey(id), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+    await saveIndex();
+    tab = "setup";
+    render();
+    toast("新しい試合を作成しました");
+  }
+
+  async function deleteGame(id){
+    if(gameIndex.games.length <= 1){ toast("最後の1件は削除できません"); return; }
+    const wasCurrent = id === gameIndex.currentGameId;
+    gameIndex.games = gameIndex.games.filter(g => g.id !== id);
+    try{ await window.storage.delete(gameMetaKey(id), false); }catch(e){ /* ignore */ }
+    try{ await window.storage.delete(gameEvKey(id), false); }catch(e){ /* ignore */ }
+    if(wasCurrent){
+      const next = gameIndex.games[0];
+      await saveIndex();
+      await switchToGame(next.id);
+    }else{
+      await saveIndex();
+      render();
+    }
+  }
+
+  // ---------- stat helpers ----------
+  const STAT_TYPES = {
+    "2m":{label:"2P ○", pts:2}, "2x":{label:"2P ×", pts:0},
+    "3m":{label:"3P ○", pts:3}, "3x":{label:"3P ×", pts:0},
+    "ft":{label:"FT", pts:0},
+    "ast":{label:"AST", pts:0}, "reb":{label:"REB", pts:0},
+    "stl":{label:"STL", pts:0}, "blk":{label:"BLK", pts:0},
+    "pf":{label:"FOUL", pts:0}
+  };
+  // Maps each stat type to the exact notation character(s) used in the sheet's
+  // 1Q/2Q/3Q/4Q raw-string columns (per the legend: Z/V/X///0/1/2/3/A/R/C/B).
+  // "pf" is excluded here — personal fouls go into their own column, not this string.
+  // Free throws are a composite: the awarded-shot count (1/2/3), followed by one
+  // "0" per made shot (e.g. awarded 3, made 1 of them -> "30"; made all 3 -> "3000").
+  const STAT_TO_CHAR = {
+    "3m":"Z", "3x":"V", "2m":"X", "2x":"/",
+    "ast":"A", "reb":"R", "stl":"C", "blk":"B"
+  };
+
+  function eventToChars(e){
+    if(e.type === "ft"){
+      return String(e.awarded) + "0".repeat(e.made||0);
+    }
+    return STAT_TO_CHAR[e.type] || "";
+  }
+
+  function buildQuarterRaw(playerId, quarter){
+    return evState.events
+      .filter(e => e.playerId===playerId && e.quarter===quarter && e.type!=="presence" && e.type!=="pf" && e.type!=="courtslot")
+      .sort((a,b)=>a.ts-b.ts)
+      .map(eventToChars)
+      .join("");
+  }
+
+  function ensurePresence(playerId, quarter){
+    if(playerId === OWNGOAL_ID) return; // own goal isn't a player — no quarters-played tracking
+    const already = evState.events.some(e => e.playerId===playerId && e.quarter===quarter);
+    if(!already){
+      evState.events.push({id:newEventId(), playerId, quarter, type:"presence", ts:Date.now()});
+    }
+  }
+
+  // Records which player occupies a given on-court slot during a given quarter,
+  // in chronological order, so playing time can be split fairly on substitutions.
+  function logCourtSlot(slot, playerId, quarter){
+    if(!playerId || playerId === OWNGOAL_ID) return;
+    const slotEvents = evState.events.filter(e => e.type==="courtslot" && e.slot===slot && e.quarter===quarter);
+    const last = slotEvents.sort((a,b)=>a.ts-b.ts).pop();
+    if(last && last.playerId === playerId) return; // no actual change
+    evState.events.push({id:newEventId(), type:"courtslot", slot, playerId, quarter, ts:Date.now()});
+  }
+
+  function addEvent(playerId, type){
+    const q = meta.quarter;
+    ensurePresence(playerId, q);
+    evState.events.push({id:newEventId(), playerId, quarter:q, type, ts:Date.now()});
+    saveEvents();
+    render();
+  }
+
+  function addFreeThrowEvent(playerId, awarded, made){
+    const q = meta.quarter;
+    ensurePresence(playerId, q);
+    evState.events.push({id:newEventId(), playerId, quarter:q, type:"ft", awarded, made, ts:Date.now()});
+    saveEvents();
+    render();
+  }
+
+  function removeEvent(id){
+    evState.events = evState.events.filter(e => e.id !== id);
+    saveEvents();
+    render();
+  }
+
+  function eventLabel(e){
+    if(e.type === "ft") return `FT ${e.awarded}本中${e.made||0}本`;
+    return STAT_TYPES[e.type] ? STAT_TYPES[e.type].label : e.type;
+  }
+
+  function undoLast(){
+    const real = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot");
+    if(real.length===0) return;
+    const last = real[real.length-1];
+    removeEvent(last.id);
+    const p = playerName(last.playerId);
+    toast(`取り消し: #${p.number} ${p.name} ${eventLabel(last)}`);
+  }
+
+  function editEvent(id, patch){
+    const e = evState.events.find(e=>e.id===id);
+    if(!e) return;
+    Object.assign(e, patch);
+    saveEvents();
+    render();
+  }
+
+  function computeStats(playerId){
+    const evs = evState.events.filter(e => e.playerId === playerId);
+    const s = {q:{1:0,2:0,3:0,4:0}, m2:0,a2:0, m3:0,a3:0, mft:0,aft:0, ast:0,reb:0,stl:0,blk:0, pfByQ:[], quarters:new Set()};
+    evs.forEach(e => {
+      s.quarters.add(e.quarter);
+      switch(e.type){
+        case "2m": s.m2++; s.a2++; s.q[e.quarter]+=2; break;
+        case "2x": s.a2++; break;
+        case "3m": s.m3++; s.a3++; s.q[e.quarter]+=3; break;
+        case "3x": s.a3++; break;
+        case "ft": s.mft += (e.made||0); s.aft += (e.awarded||0); s.q[e.quarter] += (e.made||0); break;
+        case "ast": s.ast++; break;
+        case "reb": s.reb++; break;
+        case "stl": s.stl++; break;
+        case "blk": s.blk++; break;
+        case "pf": s.pfByQ.push(e.quarter); break;
+      }
+    });
+    s.pts = s.q[1]+s.q[2]+s.q[3]+s.q[4];
+    s.quartersList = Array.from(s.quarters).sort();
+    return s;
+  }
+
+  // 出場時限: total playing-time units across the whole roster always sums to 20
+  // (5 on-court slots × 4 quarters). A slot played by one player the whole quarter
+  // is worth 1. Each substitution within that slot/quarter halves what's left:
+  // 2 occupants -> 0.5/0.5; 3 occupants -> 0.5/0.25/0.25; and so on.
+  function computePlayTime(){
+    const totals = {};
+    for(let q=1; q<=4; q++){
+      for(let slot=0; slot<5; slot++){
+        const seq = evState.events
+          .filter(e => e.type==="courtslot" && e.quarter===q && e.slot===slot)
+          .sort((a,b)=>a.ts-b.ts);
+        const order = [];
+        seq.forEach(e => { if(order.length===0 || order[order.length-1]!==e.playerId) order.push(e.playerId); });
+        if(order.length===0) continue;
+        let remaining = 1;
+        order.forEach((pid, i) => {
+          const isLast = i === order.length-1;
+          const weight = isLast ? remaining : remaining/2;
+          totals[pid] = (totals[pid]||0) + weight;
+          if(!isLast) remaining = remaining/2;
+        });
+      }
+    }
+    return totals;
+  }
+
+  const OWNGOAL_ID = "owngoal";
+  function ownGoalPlayer(){ return {id: OWNGOAL_ID, number:"-", name:"オウンゴール"}; }
+
+  function playerName(id){
+    if(id === OWNGOAL_ID) return ownGoalPlayer();
+    const p = meta.roster.find(p=>p.id===id);
+    return p ? p : {number:"-", name:"?"};
+  }
+
+  // ---------- actions ----------
+  function addPlayer(number, name){
+    if(!name.trim()) return;
+    meta.roster.push({id:"p"+Date.now()+Math.random().toString(36).slice(2,5), number: number.trim()||"-", name: name.trim()});
+    saveMeta(); render();
+  }
+  function deletePlayer(id){
+    meta.roster = meta.roster.filter(p=>p.id!==id);
+    meta.onCourt = meta.onCourt.map(x => x===id ? null : x);
+    saveMeta(); render();
+  }
+  function updatePlayer(id, number, name){
+    const p = meta.roster.find(p=>p.id===id);
+    if(!p) return;
+    if(number.trim()) p.number = number.trim();
+    if(name.trim()) p.name = name.trim();
+    saveMeta(); render();
+  }
+  function setOnCourt(slotIdx, playerId){
+    meta.onCourt = meta.onCourt.map((x,i) => (i!==slotIdx && x===playerId) ? null : x);
+    meta.onCourt[slotIdx] = playerId;
+    if(playerId){
+      ensurePresence(playerId, meta.quarter);
+      logCourtSlot(slotIdx, playerId, meta.quarter);
+    }
+    saveMeta(); saveEvents(); render();
+  }
+  // For fixing a mistaken lineup pick (e.g. wrong starter), not a real in-game
+  // substitution: clears the slot and wipes this quarter's courtslot bookkeeping
+  // for that slot, so playing-time splits aren't thrown off by the correction.
+  function removeFromCourt(slotIdx){
+    const q = meta.quarter;
+    const pid = meta.onCourt[slotIdx];
+    meta.onCourt[slotIdx] = null;
+    evState.events = evState.events.filter(e => !(e.type==="courtslot" && e.slot===slotIdx && e.quarter===q));
+    if(selectedPlayer === pid) selectedPlayer = null;
+    saveMeta(); saveEvents(); render();
+    if(pid){ const p = playerName(pid); toast(`#${p.number} ${p.name} をコートから外しました`); }
+  }
+  function setQuarter(q){
+    meta.quarter = q;
+    meta.onCourt.forEach((pid, slotIdx) => {
+      if(pid){ ensurePresence(pid, q); logCourtSlot(slotIdx, pid, q); }
+    });
+    saveMeta(); saveEvents(); render();
+  }
+  function addOpponentPts(q, pts){
+    meta.opponent[q] = Math.max(0, (meta.opponent[q]||0) + pts);
+    saveMeta(); render();
+  }
+
+  function ourTotalScore(){
+    let t = computeStats(OWNGOAL_ID).pts;
+    meta.roster.forEach(p => t += computeStats(p.id).pts);
+    return t;
+  }
+  function oppTotalScore(){
+    return (meta.opponent[1]||0)+(meta.opponent[2]||0)+(meta.opponent[3]||0)+(meta.opponent[4]||0);
+  }
+
+  // ---------- sheet-range export (C10:G36 / K10:L36) ----------
+  // Rows 10-35 (26 rows) hold real players; row 36 is permanently reserved
+  // for the own-goal virtual entry (total range: 27 rows, 10-36).
+  const PLAYER_ROWS = 26;     // rows 10-35 for real players
+
+  function buildSheetRanges(){
+    const cg = []; // C,D,E,F,G per row: 個人ファウル, 出場Q, 出場時限, 1Q, 2Q
+    const kl = []; // K,L per row: 3Q, 4Q
+    const playTime = computePlayTime();
+    const rowFor = (id) => {
+      if(!id){ return { cg:["","","","",""], kl:["",""] }; }
+      const s = computeStats(id);
+      const isOwnGoal = id === OWNGOAL_ID;
+      return {
+        cg: [
+          isOwnGoal ? "" : s.pfByQ.join(""),
+          isOwnGoal ? "" : s.quartersList.join(""),
+          isOwnGoal ? "" : (playTime[id]||0),
+          buildQuarterRaw(id,1), buildQuarterRaw(id,2)
+        ],
+        kl: [ buildQuarterRaw(id,3), buildQuarterRaw(id,4) ]
+      };
+    };
+    for(let i=0; i<PLAYER_ROWS; i++){
+      const p = meta.roster[i];
+      const row = rowFor(p ? p.id : null);
+      cg.push(row.cg); kl.push(row.kl);
+    }
+    const ogRow = rowFor(OWNGOAL_ID);
+    cg.push(ogRow.cg); kl.push(ogRow.kl); // row 36
+    return { cg, kl };
+  }
+
+  // Tries the modern Clipboard API, then falls back to the classic execCommand
+  // approach (works in more restrictive iframe/sandbox contexts). Returns true/false.
+  async function copyText(text){
+    try{
+      await navigator.clipboard.writeText(text);
+      return true;
+    }catch(e){ /* fall through */ }
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if(ok) return true;
+    }catch(e){ /* fall through */ }
+    return false;
+  }
+
+  async function copyRange(which){
+    const { cg, kl } = buildSheetRanges();
+    const rows = which === "cg" ? cg : kl;
+    const tsv = rows.map(r => r.join("\t")).join("\n");
+    const overflow = meta.roster.length > PLAYER_ROWS;
+    const label = which==="cg" ? "C10:G36" : "K10:L36";
+    const ok = await copyText(tsv);
+    if(ok){
+      toast(overflow ? `${label} 用にコピーしました（先頭${PLAYER_ROWS}人分のみ、オウンゴールは36行目）` : `${label} 用にコピーしました`);
+    }else{
+      modal = {type:"manualcopy", label, text: tsv};
+      render();
+    }
+  }
+
+  // ---------- readable box score (for in-app viewing only) ----------
+  function buildExportRows(includeHeader){
+    const header = ["背番号","選手名","出場Q数","出場時限","出場Q","個人ファウル","1Q","2Q","3Q","4Q","合計得点","2P成功","2P試投","2P%","3P成功","3P試投","3P%","FT成功","FT試投","FT%","A","R","S","B"];
+    const rows = includeHeader===false ? [] : [header];
+    const pct = (m,a) => a>0 ? (Math.round(m/a*1000)/10) + "%" : "";
+    const playTime = computePlayTime();
+    const rowOf = (p) => {
+      const s = computeStats(p.id);
+      const isOwnGoal = p.id === OWNGOAL_ID;
+      return [
+        p.number, p.name,
+        isOwnGoal ? "" : s.quartersList.length, isOwnGoal ? "" : (playTime[p.id]||0),
+        isOwnGoal ? "" : s.quartersList.join(""), isOwnGoal ? "" : s.pfByQ.join(""),
+        s.q[1], s.q[2], s.q[3], s.q[4], s.pts,
+        s.m2, s.a2, pct(s.m2,s.a2),
+        s.m3, s.a3, pct(s.m3,s.a3),
+        s.mft, s.aft, pct(s.mft,s.aft),
+        isOwnGoal ? "" : s.ast, isOwnGoal ? "" : s.reb, isOwnGoal ? "" : s.stl, isOwnGoal ? "" : s.blk
+      ];
+    };
+    meta.roster.forEach(p => rows.push(rowOf(p)));
+    rows.push(rowOf(ownGoalPlayer()));
+    return { header, rows };
+  }
+
+  function openSheet(){
+    if(!meta.sheetUrl){ toast("スプレッドシートURLが未設定です（設定タブで入力）"); return; }
+    window.open(meta.sheetUrl, "_blank", "noopener");
+  }
+
+  // ---------- rendering ----------
+  function render(){
+    const root = document.getElementById("bbRoot");
+    const app = document.getElementById("bb-app");
+    if(!ready){
+      if(app) app.classList.remove("bb-fixed");
+      root.innerHTML = `<div style="padding:60px 20px; text-align:center; color:var(--chalk-dim);">読み込み中…</div>`;
+      return;
+    }
+    if(app) app.classList.toggle("bb-fixed", tab==="game");
+    root.innerHTML = renderHeader() + renderTabs() + '<div class="bb-body" id="bbBody">' + renderBody() + '</div>' + (tab==="game" ? renderActionBar() + renderLiveLogPanel() : "") + renderModal();
+    attachHandlers();
+  }
+
+  function renderHeader(){
+    const us = ourTotalScore(), opp = oppTotalScore();
+    return `
+      <div class="bb-header">
+        <div class="bb-header-top">
+          <div class="bb-title bb-display">🏀 STAT KEEPER</div>
+          <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合</div>
+        </div>
+        <div class="bb-scorebug">
+          <div class="bb-team-block">
+            <div class="bb-team-name">${esc(meta.teamName)}</div>
+            <div class="bb-score us bb-mono">${us}</div>
+          </div>
+          <div class="bb-vs">VS</div>
+          <div class="bb-team-block">
+            <div class="bb-team-name">${esc(meta.opponentName)}</div>
+            <div class="bb-score bb-mono">${opp}</div>
+          </div>
+        </div>
+        <div class="bb-qtr-row">
+          ${[1,2,3,4].map(q => `<button class="bb-qtr-btn ${meta.quarter===q?'active':''}" data-q="${q}">${q}Q</button>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  function renderTabs(){
+    const tabs = [["setup","設定"],["game","試合"],["stats","スタッツ"]];
+    return `<div class="bb-tabs">${tabs.map(([k,l])=>`<div class="bb-tab ${tab===k?'active':''}" data-tab="${k}">${l}</div>`).join("")}</div>`;
+  }
+
+  function renderBody(){
+    if(tab==="setup") return renderSetup();
+    if(tab==="game") return renderGame();
+    if(tab==="stats") return renderStats();
+    return "";
+  }
+
+  function renderSetup(){
+    return `
+      <div class="bb-section-title">試合</div>
+      <div class="bb-card">
+        <div class="bb-row" style="margin-bottom:10px;">
+          <div style="flex:1;">
+            <span class="bb-label">試合日</span>
+            <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}"/>
+          </div>
+          <div style="flex:1;">
+            <span class="bb-label">第何試合</span>
+            <input class="bb-input" id="bbGameNumber" type="number" min="1" value="${esc(meta.gameNumber)}"/>
+          </div>
+        </div>
+        <div class="bb-row" style="gap:8px;">
+          <button class="bb-btn secondary" id="bbOpenGameSwitch" style="flex:1;">他の試合に切り替える</button>
+          <button class="bb-btn" id="bbNewGame" style="flex:1;">＋ 新しい試合</button>
+        </div>
+      </div>
+
+      <div class="bb-section-title">チーム情報</div>
+      <div class="bb-card">
+        <span class="bb-label">自チーム名</span>
+        <input class="bb-input" id="bbTeamName" value="${esc(meta.teamName)}" style="margin-bottom:10px;"/>
+        <span class="bb-label">対戦相手名</span>
+        <input class="bb-input" id="bbOppName" value="${esc(meta.opponentName)}" style="margin-bottom:10px;"/>
+        <span class="bb-label">この試合を貼り付けるGoogleスプレッドシートのURL（任意）</span>
+        <input class="bb-input" id="bbSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." value="${esc(meta.sheetUrl)}"/>
+      </div>
+
+      <div class="bb-section-title">選手登録（背番号・名前は自由に設定できます）</div>
+      <div class="bb-card">
+        <div class="bb-row">
+          <input class="bb-input" id="bbNewNum" placeholder="番号" style="max-width:70px;"/>
+          <input class="bb-input" id="bbNewName" placeholder="選手名"/>
+          <button class="bb-btn" id="bbAddPlayer">追加</button>
+        </div>
+      </div>
+      <div class="bb-card" style="padding:4px 12px;">
+        ${ meta.roster.length===0 ? '<div class="bb-empty">まだ選手が登録されていません</div>' :
+          meta.roster.map(p=>`
+            <div class="bb-player-row">
+              <div class="bb-num-badge">${esc(p.number)}</div>
+              <div class="bb-player-name">${esc(p.name)}</div>
+              <button class="bb-icon-btn edit" data-edit="${p.id}">✎</button>
+              <button class="bb-icon-btn del" data-del="${p.id}">✕</button>
+            </div>`).join("")
+        }
+      </div>`;
+  }
+
+  function renderGame(){
+    if(meta.roster.length===0){
+      return `<div class="bb-empty">まず「設定」タブで選手を登録してください</div>`;
+    }
+    const onCourt = meta.onCourt;
+    const courtTiles = onCourt.map((pid, idx) => {
+      if(!pid){
+        return `<div class="bb-tile empty" data-slot="${idx}" data-empty="1">＋ 選手を選択</div>`;
+      }
+      const p = playerName(pid);
+      const s = computeStats(pid);
+      const sel = selectedPlayer===pid ? "selected" : "";
+      return `
+        <div class="bb-tile ${sel}" data-select="${pid}">
+          <button class="bb-tile-sub" data-sub-slot="${idx}">交代</button>
+          <button class="bb-tile-remove" data-remove-slot="${idx}">削除</button>
+          <div class="bb-tile-num">#${esc(p.number)}</div>
+          <div class="bb-tile-name">${esc(p.name)}</div>
+          <div class="bb-tile-pts">${s.pts}点 / F${s.pfByQ.length}</div>
+        </div>`;
+    }).join("");
+
+    const logCount = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").length;
+    const ogStats = computeStats(OWNGOAL_ID);
+    const ogSel = selectedPlayer===OWNGOAL_ID ? "selected" : "";
+
+    return `
+      <div class="bb-game-toolbar">
+        <button class="bb-chip-btn" id="bbOpenOpp">相手チーム 得点 (計${oppTotalScore()})</button>
+        <button class="bb-chip-btn" id="bbOpenLog">記録一覧・訂正（${logCount}件）</button>
+      </div>
+      <div class="bb-court-grid">${courtTiles}</div>
+      <div class="bb-tile ${ogSel}" data-select="${OWNGOAL_ID}" style="margin-top:7px; min-height:auto; padding:10px 8px;">
+        <div class="bb-tile-name" style="white-space:normal; font-size:13px; line-height:1.4;">🥅 オウンゴール（相手の自滅点・自チームの得点になります）</div>
+        <div class="bb-tile-pts">${ogStats.pts}点</div>
+      </div>
+    `;
+  }
+
+  function formatTime(ts){
+    return new Date(ts).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  }
+
+  // Fixed panel below the action bar — always visible, scrolls on its own,
+  // and never pushes the selection area or record buttons around as it grows.
+  function renderLiveLogPanel(){
+    if(meta.roster.length===0) return "";
+    const evs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
+    const rows = evs.length===0 ? '<div class="bb-empty" style="padding:10px 0;">まだ記録がありません</div>' : evs.map(e=>{
+      const p = playerName(e.playerId);
+      return `<div class="bb-live-log-item">
+        <span class="bb-live-log-time">${formatTime(e.ts)}</span>
+        <span class="bb-live-log-who">${e.quarter}Q #${esc(p.number)} ${esc(p.name)}</span>
+        <span class="bb-live-log-what">${esc(eventLabel(e))}</span>
+      </div>`;
+    }).join("");
+    return `
+      <div class="bb-live-log-panel">
+        <div class="bb-live-log-title">最近の記録（新しい順）</div>
+        <div class="bb-live-log">${rows}</div>
+      </div>
+    `;
+  }
+
+  function renderModal(){
+    if(!modal) return "";
+    if(modal.type === "sub"){
+      const onCourt = meta.onCourt;
+      const benchIds = meta.roster.filter(p=>!onCourt.includes(p.id));
+      const benchHtml = benchIds.length===0 ? '<div class="bb-empty">ベンチに選手がいません</div>' :
+        benchIds.map(p=>{
+          const s = computeStats(p.id);
+          return `<div class="bb-bench-chip" data-bench="${p.id}">#${esc(p.number)} ${esc(p.name)} <span style="color:var(--chalk-dim)">(${s.pts}点)</span></div>`;
+        }).join("");
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>交代で入る選手を選択</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-bench-list">${benchHtml}</div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "opponent"){
+      const rows = [1,2,3,4].map(q => `
+        <div class="bb-edit-row-top" style="margin-top:8px;">
+          <span>${q}Q: ${meta.opponent[q]||0}点</span>
+          <span class="bb-row" style="gap:4px;">
+            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="1" style="padding:6px 10px;">＋1</button>
+            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="2" style="padding:6px 10px;">＋2</button>
+            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="3" style="padding:6px 10px;">＋3</button>
+            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="-1" style="padding:6px 10px;">−1</button>
+          </span>
+        </div>`).join("");
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>相手チームの得点（合計 ${oppTotalScore()}）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            ${rows}
+          </div>
+        </div>`;
+    }
+    if(modal.type === "log"){
+      const evs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
+      const rowsHtml = evs.length===0 ? '<div class="bb-empty">まだ記録がありません</div>' : evs.map(e=>`
+        <div class="bb-edit-row">
+          <div class="bb-edit-row-top"><span>${e.quarter}Q・${esc(eventLabel(e))}</span><button class="bb-edit-del" data-log-del="${e.id}">削除</button></div>
+          <div class="bb-edit-row-controls">
+            <select class="bb-edit-select" data-log-player="${e.id}">${[...meta.roster, ownGoalPlayer()].map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>
+            <select class="bb-edit-select" data-log-type="${e.id}">${Object.keys(STAT_TYPES).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
+            <select class="bb-edit-select" data-log-quarter="${e.id}" style="flex:0 0 62px;">${[1,2,3,4].map(q=>`<option value="${q}" ${q===e.quarter?"selected":""}>${q}Q</option>`).join("")}</select>
+          </div>
+          ${e.type==="ft" ? `
+          <div class="bb-edit-row-controls" style="margin-top:6px;">
+            <select class="bb-edit-select" data-log-ft-awarded="${e.id}">${[1,2,3].map(n=>`<option value="${n}" ${n===e.awarded?"selected":""}>もらった${n}本</option>`).join("")}</select>
+            <select class="bb-edit-select" data-log-ft-made="${e.id}">${[0,1,2,3].filter(m=>m<=e.awarded).map(m=>`<option value="${m}" ${m===e.made?"selected":""}>決めた${m}本</option>`).join("")}</select>
+          </div>` : ""}
+        </div>`).join("");
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>記録一覧・訂正</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            ${rowsHtml}
+          </div>
+        </div>`;
+    }
+    if(modal.type === "ft"){
+      const p = playerName(selectedPlayer);
+      if(!modal.awarded){
+        return `
+          <div class="bb-modal-overlay" id="bbModalOverlay">
+            <div class="bb-modal">
+              <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー：もらった本数は？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+              <div class="bb-row" style="gap:8px;">
+                <button class="bb-btn" data-ft-awarded="1" style="flex:1; padding:16px 0; font-size:16px;">1本<br/><span style="font-size:11px; opacity:0.8;">(カウントワン)</span></button>
+                <button class="bb-btn" data-ft-awarded="2" style="flex:1; padding:16px 0; font-size:16px;">2本</button>
+                <button class="bb-btn" data-ft-awarded="3" style="flex:1; padding:16px 0; font-size:16px;">3本</button>
+              </div>
+            </div>
+          </div>`;
+      }
+      const n = modal.awarded;
+      const madeBtns = [];
+      for(let m=0; m<=n; m++) madeBtns.push(`<button class="bb-btn ${m===n?'':'secondary'}" data-ft-made="${m}" style="flex:1; padding:16px 0; font-size:16px;">${m}本</button>`);
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー ${n}本中、決めたのは？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-row" style="gap:8px;">${madeBtns.join("")}</div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "manualcopy"){
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>${esc(modal.label)} 用データ（自動コピー不可）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:8px;">
+              このブラウザでは自動コピーができませんでした。下の欄は選択済みなので、そのまま長押し→コピー（または Ctrl/Cmd+C）でコピーしてください。
+            </div>
+            <textarea id="bbManualCopyArea" readonly style="width:100%; height:140px; background:var(--ink); color:var(--chalk); border:1px solid var(--line); border-radius:8px; padding:8px; font-size:12px; font-family:monospace;">${esc(modal.text)}</textarea>
+            <button class="bb-btn" id="bbManualCopyBtn" style="width:100%; margin-top:8px;">もう一度コピーを試す</button>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "editPlayer"){
+      const p = meta.roster.find(pl=>pl.id===modal.playerId);
+      if(!p) return "";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>選手情報を編集</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <span class="bb-label">背番号</span>
+            <input class="bb-input" id="bbEditNum" value="${esc(p.number)}" style="margin-bottom:10px;"/>
+            <span class="bb-label">選手名</span>
+            <input class="bb-input" id="bbEditName" value="${esc(p.name)}" style="margin-bottom:14px;"/>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn" id="bbEditSave" style="flex:1;">保存</button>
+              <button class="bb-btn danger" id="bbEditDelete" style="flex:1;">この選手を削除</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmDelete"){
+      const p = meta.roster.find(pl=>pl.id===modal.playerId);
+      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>${name} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">記録済みのスタッツも一緒に表示されなくなります。この操作は取り消せません。</div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelDelete" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmDelete" style="flex:1;">削除する</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmRemoveCourt"){
+      const pid = meta.onCourt[modal.slot];
+      const p = pid ? playerName(pid) : null;
+      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>${name} をコートから外しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              「削除」はスタメンの選び間違いなど、実際には出場していなかった場合の訂正用です。<b>交代とは違い、出場時限の分け合いは発生しません。</b>記録済みのスタッツ自体は消えません。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelRemoveCourt" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmRemoveCourt" style="flex:1;">コートから外す</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "gameSwitch"){
+      const sorted = gameIndex.games.slice().sort((a,b)=> (b.date||"").localeCompare(a.date||"") || (b.gameNumber||0)-(a.gameNumber||0));
+      const rows = sorted.map(g => `
+        <div class="bb-player-row">
+          <div class="bb-player-name" data-switch-game="${g.id}" style="cursor:pointer; ${g.id===gameIndex.currentGameId ? 'color:var(--gold); font-weight:800;' : ''}">
+            ${esc(gameLabel(g))} ${g.id===gameIndex.currentGameId ? "（現在）" : ""}
+          </div>
+          ${gameIndex.games.length>1 ? `<button class="bb-icon-btn del" data-ask-delete-game="${g.id}">✕</button>` : ""}
+        </div>`).join("");
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>試合を切り替える</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            ${rows || '<div class="bb-empty">試合がありません</div>'}
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmDeleteGame"){
+      const g = gameIndex.games.find(g=>g.id===modal.id);
+      const name = g ? gameLabel(g) : "この試合";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>${esc(name)} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">この試合の選手登録・記録もすべて削除されます。この操作は取り消せません。</div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelDeleteGame" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmDeleteGame" style="flex:1;">削除する</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "newGame"){
+      const today = new Date().toISOString().slice(0,10);
+      const sameDay = gameIndex.games.filter(g => g.date === today);
+      const suggestedNumber = sameDay.length ? Math.max(...sameDay.map(g=>g.gameNumber||1)) + 1 : 1;
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-row" style="margin-bottom:14px;">
+              <div style="flex:1;">
+                <span class="bb-label">試合日</span>
+                <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(today)}"/>
+              </div>
+              <div style="flex:1;">
+                <span class="bb-label">第何試合</span>
+                <input class="bb-input" id="bbNewGameNumber" type="number" min="1" value="${suggestedNumber}"/>
+              </div>
+            </div>
+            <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
+            <button class="bb-btn" id="bbCreateGame" style="width:100%;">この内容で作成</button>
+          </div>
+        </div>`;
+    }
+    return "";
+  }
+
+  function renderActionBar(){
+    if(meta.roster.length===0) return "";
+    const p = selectedPlayer ? playerName(selectedPlayer) : null;
+    const disabled = selectedPlayer ? "" : "disabled";
+    const hasEvents = evState.events.some(e=>e.type!=="presence");
+    const whoLine = `
+        <div class="bb-actionbar-who">
+          <span>${p ? `記録対象: <b>#${esc(p.number)} ${esc(p.name)}</b>` : "選手をタップして選択"}</span>
+          <button class="bb-undo-btn" id="bbUndoBtn" ${hasEvents ? "" : "disabled"}>↩ 直前を戻す</button>
+        </div>`;
+    if(selectedPlayer === OWNGOAL_ID){
+      // Own goal isn't a teammate — only points count, no AST/REB/STL/BLK/FOUL.
+      return `
+      <div class="bb-actionbar">
+        ${whoLine}
+        <div class="bb-grid">
+          <button class="bb-stat-btn make" data-og-score="2" style="grid-column: span 2;">2点</button>
+          <button class="bb-stat-btn make" data-og-score="3" style="grid-column: span 2;">3点</button>
+          <button class="bb-stat-btn ft" data-og-score="1" style="grid-column: span 4;">1点</button>
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="bb-actionbar">
+        ${whoLine}
+        <div class="bb-grid">
+          <button class="bb-stat-btn make" data-stat="2m" ${disabled}>2P ○</button>
+          <button class="bb-stat-btn miss" data-stat="2x" ${disabled}>2P ×</button>
+          <button class="bb-stat-btn make" data-stat="3m" ${disabled}>3P ○</button>
+          <button class="bb-stat-btn miss" data-stat="3x" ${disabled}>3P ×</button>
+          <button class="bb-stat-btn ft" data-open-ft="1" ${disabled}>FT</button>
+          <button class="bb-stat-btn neutral" data-stat="ast" ${disabled}>AST</button>
+          <button class="bb-stat-btn neutral" data-stat="reb" ${disabled}>REB</button>
+          <button class="bb-stat-btn neutral" data-stat="stl" ${disabled}>STL</button>
+          <button class="bb-stat-btn neutral" data-stat="blk" ${disabled}>BLK</button>
+          <button class="bb-stat-btn foul" data-stat="pf" ${disabled}>FOUL</button>
+        </div>
+      </div>`;
+  }
+
+  function renderStats(){
+    if(meta.roster.length===0) return `<div class="bb-empty">選手が登録されていません</div>`;
+    const {header, rows: body} = buildExportRows(true);
+    const sum = (idx) => body.reduce((a,r)=>a+(Number(r[idx])||0),0);
+    return `
+      <div class="bb-section-title">スプレッドシートに貼り付け</div>
+      <div class="bb-card" style="padding:10px 12px;">
+        <div class="bb-row" style="gap:8px;">
+          <button class="bb-btn" id="bbCopyCG" style="flex:1;">① C10:G36 コピー</button>
+          <button class="bb-btn" id="bbCopyKL" style="flex:1;">② K10:L36 コピー</button>
+        </div>
+        <div class="bb-row" style="gap:8px; margin-top:8px;">
+          <button class="bb-btn secondary" id="bbOpenSheetBtn" style="flex:1;">③ シートを開く ↗</button>
+        </div>
+        ${meta.sheetUrl ? `<div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; word-break:break-all;">貼り付け先: ${esc(meta.sheetUrl)}</div>` : `<div style="font-size:11px; color:var(--whistle); margin-top:8px;">※ 設定タブでスプレッドシートURLを登録すると③で直接開けます</div>`}
+        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
+          ①はC10セル、②はK10セルをクリックしてから貼り付けてください。選手の並び順は下の登録順（＝シートの行順）に対応しています。
+        </div>
+      </div>
+
+      <div class="bb-section-title">ボックススコア（アプリ内で確認用）</div>
+      <div class="bb-table-wrap">
+        <table class="bb-stats">
+          <thead><tr>${header.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${body.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`).join("")}
+            <tr>
+              <td colspan="2">合計</td><td></td><td></td><td></td><td></td>
+              <td>${sum(6)}</td><td>${sum(7)}</td><td>${sum(8)}</td><td>${sum(9)}</td><td>${sum(10)}</td>
+              <td>${sum(11)}</td><td>${sum(12)}</td><td></td>
+              <td>${sum(14)}</td><td>${sum(15)}</td><td></td>
+              <td>${sum(17)}</td><td>${sum(18)}</td><td></td>
+              <td>${sum(20)}</td><td>${sum(21)}</td><td>${sum(22)}</td><td>${sum(23)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:11px; color:var(--chalk-dim); margin-top:10px; line-height:1.6;">
+        ※ 出場Qは選手がコートに入っていた/記録が発生したクオーターの一覧です。個人ファウルは発生したクオーター番号の並びです（例「233」＝2Qに1回・3Qに2回）。<br/>
+        ※ 出場時限は、そのクオーターを通しで出た場合は1、途中交代した場合は交代相手と0.5ずつ、さらにその後途中交代があれば0.25ずつ…という形で分け合います（全員の合計は最大20になります）。<br/>
+        ※ 「開く」はスプレッドシートを新しいタブで開くだけです（Googleの認証が必要なため自動入力はできません）。開いたら貼り付け先のセルをタップ→貼り付け、の2手で完了します。
+      </div>
+    `;
+  }
+
+  function attachHandlers(){
+    document.querySelectorAll("[data-tab]").forEach(el=>{
+      el.addEventListener("click", ()=>{ tab = el.getAttribute("data-tab"); modal=null; render(); });
+    });
+    document.querySelectorAll("[data-q]").forEach(el=>{
+      el.addEventListener("click", ()=> setQuarter(Number(el.getAttribute("data-q"))));
+    });
+
+    if(tab==="setup"){
+      const teamName = document.getElementById("bbTeamName");
+      const oppName = document.getElementById("bbOppName");
+      const date = document.getElementById("bbDate");
+      const gameNumber = document.getElementById("bbGameNumber");
+      const sheetUrl = document.getElementById("bbSheetUrl");
+      if(sheetUrl) sheetUrl.addEventListener("change", ()=>{ meta.sheetUrl=sheetUrl.value.trim(); saveMeta(); });
+      if(teamName) teamName.addEventListener("change", ()=>{ meta.teamName=teamName.value; saveMeta(); });
+      if(oppName) oppName.addEventListener("change", ()=>{ meta.opponentName=oppName.value; saveMeta(); });
+      if(date) date.addEventListener("change", ()=>{ meta.date=date.value; saveMeta(); });
+      if(gameNumber) gameNumber.addEventListener("change", ()=>{ meta.gameNumber=Math.max(1, Number(gameNumber.value)||1); saveMeta(); });
+      const addBtn = document.getElementById("bbAddPlayer");
+      if(addBtn) addBtn.addEventListener("click", ()=>{
+        const num = document.getElementById("bbNewNum");
+        const name = document.getElementById("bbNewName");
+        addPlayer(num.value, name.value);
+        num.value=""; name.value=""; name.focus();
+      });
+      document.querySelectorAll("[data-del]").forEach(el=>{
+        el.addEventListener("click", ()=>{ modal = {type:"confirmDelete", playerId: el.getAttribute("data-del")}; render(); });
+      });
+      document.querySelectorAll("[data-edit]").forEach(el=>{
+        el.addEventListener("click", ()=>{ modal = {type:"editPlayer", playerId: el.getAttribute("data-edit")}; render(); });
+      });
+      const openSwitch = document.getElementById("bbOpenGameSwitch");
+      if(openSwitch) openSwitch.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
+      const newGameBtn = document.getElementById("bbNewGame");
+      if(newGameBtn) newGameBtn.addEventListener("click", ()=>{ modal = {type:"newGame"}; render(); });
+    }
+
+    if(tab==="game"){
+      document.querySelectorAll("[data-select]").forEach(el=>{
+        el.addEventListener("click", (e)=>{
+          if(e.target.closest("[data-sub-slot]") || e.target.closest("[data-remove-slot]")) return;
+          selectedPlayer = el.getAttribute("data-select");
+          render();
+        });
+      });
+      document.querySelectorAll("[data-sub-slot]").forEach(el=>{
+        el.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          modal = {type:"sub", slot: Number(el.getAttribute("data-sub-slot"))};
+          render();
+        });
+      });
+      document.querySelectorAll("[data-remove-slot]").forEach(el=>{
+        el.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          modal = {type:"confirmRemoveCourt", slot: Number(el.getAttribute("data-remove-slot"))};
+          render();
+        });
+      });
+      document.querySelectorAll("[data-empty]").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          modal = {type:"sub", slot: Number(el.getAttribute("data-slot"))};
+          render();
+        });
+      });
+      const openOpp = document.getElementById("bbOpenOpp");
+      if(openOpp) openOpp.addEventListener("click", ()=>{ modal = {type:"opponent"}; render(); });
+      const openLog = document.getElementById("bbOpenLog");
+      if(openLog) openLog.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
+      const undoBtn = document.getElementById("bbUndoBtn");
+      if(undoBtn) undoBtn.addEventListener("click", undoLast);
+      document.querySelectorAll("[data-stat]").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          if(!selectedPlayer) return;
+          addEvent(selectedPlayer, el.getAttribute("data-stat"));
+        });
+      });
+      document.querySelectorAll("[data-open-ft]").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          if(!selectedPlayer) return;
+          modal = {type:"ft", awarded:null};
+          render();
+        });
+      });
+      document.querySelectorAll("[data-og-score]").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          if(!selectedPlayer) return;
+          const v = el.getAttribute("data-og-score");
+          if(v === "2") addEvent(selectedPlayer, "2m");
+          else if(v === "3") addEvent(selectedPlayer, "3m");
+          else if(v === "1") addFreeThrowEvent(selectedPlayer, 1, 1);
+        });
+      });
+    }
+
+    if(tab==="stats"){
+      const cgBtn = document.getElementById("bbCopyCG");
+      if(cgBtn) cgBtn.addEventListener("click", ()=>copyRange("cg"));
+      const klBtn = document.getElementById("bbCopyKL");
+      if(klBtn) klBtn.addEventListener("click", ()=>copyRange("kl"));
+      const openBtn = document.getElementById("bbOpenSheetBtn");
+      if(openBtn) openBtn.addEventListener("click", openSheet);
+    }
+
+    // ---- modal handlers (apply regardless of active tab) ----
+    if(modal){
+      const overlay = document.getElementById("bbModalOverlay");
+      if(overlay){
+        overlay.addEventListener("click", (e)=>{ if(e.target === overlay){ modal=null; render(); } });
+      }
+      const closeBtn = document.getElementById("bbModalClose");
+      if(closeBtn) closeBtn.addEventListener("click", ()=>{ modal=null; render(); });
+
+      if(modal.type === "sub"){
+        document.querySelectorAll("[data-bench]").forEach(el=>{
+          el.addEventListener("click", ()=>{
+            const slot = modal.slot, pid = el.getAttribute("data-bench");
+            modal = null;
+            setOnCourt(slot, pid);
+          });
+        });
+      }
+      if(modal.type === "editPlayer"){
+        const saveBtn = document.getElementById("bbEditSave");
+        if(saveBtn) saveBtn.addEventListener("click", ()=>{
+          const num = document.getElementById("bbEditNum").value;
+          const name = document.getElementById("bbEditName").value;
+          const id = modal.playerId;
+          modal = null;
+          updatePlayer(id, num, name);
+        });
+        const delBtn = document.getElementById("bbEditDelete");
+        if(delBtn) delBtn.addEventListener("click", ()=>{
+          modal = {type:"confirmDelete", playerId: modal.playerId};
+          render();
+        });
+      }
+      if(modal.type === "confirmDelete"){
+        const cancelBtn = document.getElementById("bbCancelDelete");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmDelete");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const id = modal.playerId;
+          modal = null;
+          deletePlayer(id);
+        });
+      }
+      if(modal.type === "confirmRemoveCourt"){
+        const cancelBtn = document.getElementById("bbCancelRemoveCourt");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmRemoveCourt");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const slot = modal.slot;
+          modal = null;
+          removeFromCourt(slot);
+        });
+      }
+      if(modal.type === "gameSwitch"){
+        document.querySelectorAll("[data-switch-game]").forEach(el=>{
+          el.addEventListener("click", ()=>{
+            const id = el.getAttribute("data-switch-game");
+            modal = null;
+            switchToGame(id);
+          });
+        });
+        document.querySelectorAll("[data-ask-delete-game]").forEach(el=>{
+          el.addEventListener("click", (e)=>{
+            e.stopPropagation();
+            modal = {type:"confirmDeleteGame", id: el.getAttribute("data-ask-delete-game")};
+            render();
+          });
+        });
+      }
+      if(modal.type === "confirmDeleteGame"){
+        const cancelBtn = document.getElementById("bbCancelDeleteGame");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
+        const confirmBtn = document.getElementById("bbConfirmDeleteGame");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const id = modal.id;
+          modal = null;
+          deleteGame(id);
+        });
+      }
+      if(modal.type === "newGame"){
+        const createBtn = document.getElementById("bbCreateGame");
+        if(createBtn) createBtn.addEventListener("click", ()=>{
+          const date = document.getElementById("bbNewGameDate").value;
+          const num = Math.max(1, Number(document.getElementById("bbNewGameNumber").value)||1);
+          modal = null;
+          createNewGame(date, num);
+        });
+      }
+      if(modal.type === "opponent"){
+        document.querySelectorAll("[data-opp]").forEach(el=>{
+          el.addEventListener("click", ()=>{
+            addOpponentPts(Number(el.getAttribute("data-opp-q")), Number(el.getAttribute("data-opp")));
+          });
+        });
+      }
+      if(modal.type === "ft"){
+        document.querySelectorAll("[data-ft-awarded]").forEach(el=>{
+          el.addEventListener("click", ()=>{
+            modal = {type:"ft", awarded: Number(el.getAttribute("data-ft-awarded"))};
+            render();
+          });
+        });
+        document.querySelectorAll("[data-ft-made]").forEach(el=>{
+          el.addEventListener("click", ()=>{
+            const awarded = modal.awarded, made = Number(el.getAttribute("data-ft-made"));
+            modal = null;
+            addFreeThrowEvent(selectedPlayer, awarded, made);
+          });
+        });
+      }
+      if(modal.type === "manualcopy"){
+        const ta = document.getElementById("bbManualCopyArea");
+        if(ta){ ta.focus(); ta.select(); }
+        const retryBtn = document.getElementById("bbManualCopyBtn");
+        if(retryBtn) retryBtn.addEventListener("click", async ()=>{
+          const ok = await copyText(modal.text);
+          if(ok){
+            toast(`${modal.label} 用にコピーしました`);
+            modal = null;
+            render();
+          }else if(ta){
+            ta.focus(); ta.select();
+            toast("自動コピーできませんでした。手動で選択してコピーしてください");
+          }
+        });
+      }
+      if(modal.type === "log"){
+        document.querySelectorAll("[data-log-del]").forEach(el=>{
+          el.addEventListener("click", ()=> removeEvent(el.getAttribute("data-log-del")));
+        });
+        document.querySelectorAll("[data-log-player]").forEach(el=>{
+          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-player"), {playerId: el.value}));
+        });
+        document.querySelectorAll("[data-log-type]").forEach(el=>{
+          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-type"), {type: el.value}));
+        });
+        document.querySelectorAll("[data-log-quarter]").forEach(el=>{
+          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-quarter"), {quarter: Number(el.value)}));
+        });
+        document.querySelectorAll("[data-log-ft-awarded]").forEach(el=>{
+          el.addEventListener("change", ()=>{
+            const id = el.getAttribute("data-log-ft-awarded");
+            const ev = evState.events.find(e=>e.id===id);
+            const newAwarded = Number(el.value);
+            const newMade = Math.min(ev ? (ev.made||0) : 0, newAwarded);
+            editEvent(id, {awarded: newAwarded, made: newMade});
+          });
+        });
+        document.querySelectorAll("[data-log-ft-made]").forEach(el=>{
+          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-ft-made"), {made: Number(el.value)}));
+        });
+      }
+    }
+  }
+
+  loadApp();
+})();
+</script>
