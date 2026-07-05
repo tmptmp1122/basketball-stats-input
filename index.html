@@ -1066,7 +1066,7 @@ if (!window.storage) {
       const evs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
       const rowsHtml = evs.length===0 ? '<div class="bb-empty">まだ記録がありません</div>' : evs.map(e=>`
         <div class="bb-edit-row">
-          <div class="bb-edit-row-top"><span>${e.quarter}Q・${esc(eventLabel(e))}</span><button class="bb-edit-del" data-log-del="${e.id}">削除</button></div>
+          <div class="bb-edit-row-top"><span>${e.quarter}Q・${esc(eventLabel(e))}</span><button class="bb-edit-del" data-ask-log-del="${e.id}">削除</button></div>
           <div class="bb-edit-row-controls">
             <select class="bb-edit-select" data-log-player="${e.id}">${[...meta.roster, ownGoalPlayer()].map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>
             <select class="bb-edit-select" data-log-type="${e.id}">${Object.keys(STAT_TYPES).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
@@ -1260,6 +1260,22 @@ if (!window.storage) {
             <div class="bb-row" style="gap:8px;">
               <button class="bb-btn secondary" id="bbCancelClearAll" style="flex:1;">キャンセル</button>
               <button class="bb-btn danger" id="bbConfirmClearAll" style="flex:1;">すべて削除する</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmDeleteLog"){
+      const e = evState.events.find(ev=>ev.id===modal.id);
+      const p = e ? playerName(e.playerId) : null;
+      const label = e ? `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}` : "この記録";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>この記録を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この操作は取り消せません。</div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelDeleteLog" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmDeleteLog" style="flex:1;">削除する</button>
             </div>
           </div>
         </div>`;
@@ -1619,8 +1635,8 @@ if (!window.storage) {
         });
       }
       if(modal.type === "log"){
-        document.querySelectorAll("[data-log-del]").forEach(el=>{
-          el.addEventListener("click", ()=> removeEvent(el.getAttribute("data-log-del")));
+        document.querySelectorAll("[data-ask-log-del]").forEach(el=>{
+          el.addEventListener("click", ()=>{ modal = {type:"confirmDeleteLog", id: el.getAttribute("data-ask-log-del")}; render(); });
         });
         document.querySelectorAll("[data-log-player]").forEach(el=>{
           el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-player"), {playerId: el.value}));
@@ -1644,10 +1660,19 @@ if (!window.storage) {
           el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-ft-made"), {made: Number(el.value)}));
         });
       }
+      if(modal.type === "confirmDeleteLog"){
+        const cancelBtn = document.getElementById("bbCancelDeleteLog");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
+        const confirmBtn = document.getElementById("bbConfirmDeleteLog");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const id = modal.id;
+          modal = {type:"log"};
+          removeEvent(id);
+        });
+      }
     }
   }
 
-  
   loadApp();
 })();
 </script>
