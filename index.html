@@ -300,6 +300,15 @@ if (!window.storage) {
   let evCounter = 0;
   function newEventId(){ return "e" + (evCounter++) + "-" + Date.now(); }
   function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function todayLocal(){
+    // Local calendar date (not UTC) — toISOString() would be off by a day
+    // during early-morning hours in timezones ahead of UTC (e.g. Japan).
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${day}`;
+  }
   function toast(msg){
     const t = document.getElementById("bbToast");
     t.textContent = msg;
@@ -338,7 +347,7 @@ if (!window.storage) {
     return {
       teamName: "B☆Bキッズ",
       opponentName: "対戦相手",
-      date: date || new Date().toISOString().slice(0,10),
+      date: date || todayLocal(),
       gameNumber: gameNumber || 1,
       venue: "",
       sheetUrl: DEFAULT_SHEET_URL,
@@ -1230,7 +1239,7 @@ if (!window.storage) {
         </div>`;
     }
     if(modal.type === "newGame"){
-      const today = new Date().toISOString().slice(0,10);
+      const today = todayLocal();
       const sameDay = gameIndex.games.filter(g => g.date === today);
       const suggestedNumber = sameDay.length ? Math.max(...sameDay.map(g=>g.gameNumber||1)) + 1 : 1;
       return `
