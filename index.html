@@ -319,6 +319,7 @@ if (!window.storage) {
 
   // ---------- app state ----------
   let ready = false;         // true once personal data has loaded
+  let teamMode = "boys";     // "boys" | "girls" — namespaces all storage below it
   let tab = "setup";         // setup | game | stats
   let modal = null;          // {type:'sub', slot} | {type:'opponent'} | {type:'log'} | null
   let selectedPlayer = null; // player id selected for stat entry
@@ -327,30 +328,49 @@ if (!window.storage) {
   let meta = null;    // {teamName,opponentName,date,gameNumber,venue,sheetUrl,roster:[],onCourt:[5],quarter,opponent:{1:0,2:0,3:0,4:0},updatedAt}
   let evState = { events: [], updatedAt: 0 };
 
-  // Pre-registered roster used whenever a new game is created.
-  const DEFAULT_ROSTER = [
-    {number:"4", name:"きすけ"}, {number:"5", name:"たくみ"}, {number:"6", name:"たくま"},
-    {number:"7", name:"りゅうま"}, {number:"8", name:"ゆうき"}, {number:"9", name:"きょうすけ"},
-    {number:"10", name:"ことし"}, {number:"11", name:"とく"}, {number:"12", name:"そうじろう"},
-    {number:"13", name:"ともひと"}, {number:"14", name:"じん"}, {number:"15", name:"りきと"},
-    {number:"75", name:"きよなり"}, {number:"16", name:"りゅうせい"}, {number:"48", name:"わたる"},
-    {number:"17", name:"しょうご"}, {number:"25", name:"とうご"}, {number:"33", name:"あおい"},
-    {number:"73", name:"かいち"}, {number:"40", name:"あきおみ"}, {number:"70", name:"いっけい"}
-  ];
-  function makeDefaultRoster(){
-    return DEFAULT_ROSTER.map(p => ({ id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:p.number, name:p.name }));
+  // Pre-registered rosters + sheet URLs per team. teamMode ("boys"|"girls")
+  // selects which of these is used for new games and as the storage namespace.
+  const TEAM_DEFAULTS = {
+    boys: {
+      teamName: "B☆Bキッズ",
+      sheetUrl: "https://docs.google.com/spreadsheets/d/1Vt-qsPfKz9bT5fnaTCVBIyxTxJrAUDqYuokGihV61iM/edit?gid=527910653#gid=527910653",
+      roster: [
+        {number:"4", name:"きすけ"}, {number:"5", name:"たくみ"}, {number:"6", name:"たくま"},
+        {number:"7", name:"りゅうま"}, {number:"8", name:"ゆうき"}, {number:"9", name:"きょうすけ"},
+        {number:"10", name:"ことし"}, {number:"11", name:"とく"}, {number:"12", name:"そうじろう"},
+        {number:"13", name:"ともひと"}, {number:"14", name:"じん"}, {number:"15", name:"りきと"},
+        {number:"75", name:"きよなり"}, {number:"16", name:"りゅうせい"}, {number:"48", name:"わたる"},
+        {number:"17", name:"しょうご"}, {number:"25", name:"とうご"}, {number:"33", name:"あおい"},
+        {number:"73", name:"かいち"}, {number:"40", name:"あきおみ"}, {number:"70", name:"いっけい"}
+      ]
+    },
+    girls: {
+      teamName: "B☆Bキッズ",
+      sheetUrl: "https://docs.google.com/spreadsheets/d/1O9TnDFpi1DSPqB_-tzvcRQmDeRBSWCtXbdOJ9hDXFjQ/edit?gid=527910653#gid=527910653",
+      roster: [
+        {number:"4", name:"しの"}, {number:"5", name:"みほ"}, {number:"6", name:"みさき"},
+        {number:"7", name:"かな"}, {number:"8", name:"くるみ"}, {number:"9", name:"かや"},
+        {number:"10", name:"ゆみね"}, {number:"11", name:"みお（ふくはら）"}, {number:"12", name:"とあ"},
+        {number:"17", name:"いこ"}, {number:"52", name:"ひかり"}, {number:"22", name:"すずか"},
+        {number:"23", name:"さゆり"}, {number:"47", name:"ゆいか"}, {number:"13", name:"さゆり"},
+        {number:"14", name:"ふたば"}, {number:"78", name:"りん"}, {number:"15", name:"ひなの"},
+        {number:"82", name:"みお（もり）"}, {number:"96", name:"さな"}
+      ]
+    }
+  };
+  function makeDefaultRoster(mode){
+    return TEAM_DEFAULTS[mode || teamMode].roster.map(p => ({ id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:p.number, name:p.name }));
   }
 
-  const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Vt-qsPfKz9bT5fnaTCVBIyxTxJrAUDqYuokGihV61iM/edit?gid=527910653#gid=527910653";
-
   function freshMeta(date, gameNumber){
+    const d = TEAM_DEFAULTS[teamMode];
     return {
-      teamName: "B☆Bキッズ",
+      teamName: d.teamName,
       opponentName: "対戦相手",
       date: date || todayLocal(),
       gameNumber: gameNumber || 1,
       venue: "",
-      sheetUrl: DEFAULT_SHEET_URL,
+      sheetUrl: d.sheetUrl,
       roster: makeDefaultRoster(),
       onCourtByQuarter: { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] },
       quarter: 1,
@@ -375,13 +395,15 @@ if (!window.storage) {
   }
 
   // Personal (non-shared) storage — scoped to this person only, no room code needed.
-  // One index lists every game (date + game number); each game's own meta/events
-  // are stored under their own keys so switching games is just loading a new pair.
-  const INDEX_KEY = "bb-solo-index";
-  const LEGACY_META_KEY = "bb-solo-meta";   // pre-multi-game format, migrated on first load
+  // teamMode ("boys"|"girls") namespaces everything below it so the two teams'
+  // games never mix. "boys" keeps the original (pre-team-switch) key names so
+  // existing data isn't orphaned; "girls" uses a separate, clearly-named set.
+  const TEAM_MODE_KEY = "bb-team-mode";
+  const LEGACY_META_KEY = "bb-solo-meta";   // pre-multi-game format, migrated on first load (boys only)
   const LEGACY_EV_KEY = "bb-solo-events";
-  function gameMetaKey(id){ return "bb-solo-game-" + id + "-meta"; }
-  function gameEvKey(id){ return "bb-solo-game-" + id + "-events"; }
+  function indexKey(){ return teamMode === "boys" ? "bb-solo-index" : "bb-solo-girls-index"; }
+  function gameMetaKey(id){ return teamMode === "boys" ? ("bb-solo-game-" + id + "-meta") : ("bb-solo-girls-game-" + id + "-meta"); }
+  function gameEvKey(id){ return teamMode === "boys" ? ("bb-solo-game-" + id + "-events") : ("bb-solo-girls-game-" + id + "-events"); }
   function newGameId(){ return "g" + Date.now() + Math.random().toString(36).slice(2,7); }
 
   function gameLabel(g){
@@ -389,7 +411,7 @@ if (!window.storage) {
   }
 
   async function saveIndex(){
-    try{ await window.storage.set(INDEX_KEY, JSON.stringify(gameIndex), false); }catch(e){ console.error(e); }
+    try{ await window.storage.set(indexKey(), JSON.stringify(gameIndex), false); }catch(e){ console.error(e); }
   }
 
   function syncIndexEntry(){
@@ -399,14 +421,26 @@ if (!window.storage) {
   }
 
   async function loadApp(){
+    try{
+      const res = await window.storage.get(TEAM_MODE_KEY, false);
+      teamMode = res ? (JSON.parse(res.value).mode || "boys") : "boys";
+    }catch(e){ teamMode = "boys"; }
+    await loadCurrentTeamData({initial:true});
+  }
+
+  async function loadCurrentTeamData(opts){
+    const isInitial = !!(opts && opts.initial);
     let idx = null;
-    try{ const res = await window.storage.get(INDEX_KEY, false); idx = res ? JSON.parse(res.value) : null; }catch(e){ idx = null; }
+    try{ const res = await window.storage.get(indexKey(), false); idx = res ? JSON.parse(res.value) : null; }catch(e){ idx = null; }
 
     if(!idx){
-      // First time on the new multi-game format: migrate legacy single-game data if present.
+      // First time for this team: migrate legacy single-game data if present (boys only —
+      // that pre-multi-game, pre-team-switch format only ever existed for the original team).
       let legacyMeta = null, legacyEv = null;
-      try{ const res = await window.storage.get(LEGACY_META_KEY, false); legacyMeta = res ? JSON.parse(res.value) : null; }catch(e){ legacyMeta = null; }
-      try{ const res = await window.storage.get(LEGACY_EV_KEY, false); legacyEv = res ? JSON.parse(res.value) : null; }catch(e){ legacyEv = null; }
+      if(teamMode === "boys"){
+        try{ const res = await window.storage.get(LEGACY_META_KEY, false); legacyMeta = res ? JSON.parse(res.value) : null; }catch(e){ legacyMeta = null; }
+        try{ const res = await window.storage.get(LEGACY_EV_KEY, false); legacyEv = res ? JSON.parse(res.value) : null; }catch(e){ legacyEv = null; }
+      }
       const id = newGameId();
       if(legacyMeta){
         if(legacyMeta.gameNumber === undefined) legacyMeta.gameNumber = 1;
@@ -429,35 +463,84 @@ if (!window.storage) {
       meta = m || freshMeta();
       evState = ev || { events: [], updatedAt: 0 };
     }
-    if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
-    if(meta.teamName === "自チーム") meta.teamName = "B☆Bキッズ";
+    if(!meta.sheetUrl) meta.sheetUrl = TEAM_DEFAULTS[teamMode].sheetUrl;
+    if(meta.teamName === "自チーム") meta.teamName = TEAM_DEFAULTS[teamMode].teamName;
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
     if(!meta.onCourtByQuarter) migrateOnCourt();
     ready = true;
-    tab = meta.roster.length ? "game" : "setup";
+    // Only jump to the "game" tab on the very first-ever load. Switching team
+    // mode later should stay right where the user was (usually Setup).
+    if(isInitial) tab = meta.roster.length ? "game" : "setup";
     saveMeta();
     render();
   }
 
-  async function saveMeta(){
-    meta.updatedAt = Date.now();
-    syncIndexEntry();
-    try{ await window.storage.set(gameMetaKey(gameIndex.currentGameId), JSON.stringify(meta), false); }catch(e){ console.error(e); }
-    saveIndex();
+  // ---------- concurrency guards ----------
+  // Storage writes (saveMeta/saveEvents) are often fire-and-forget from simple
+  // taps. Structural operations (switching team/game, creating/deleting a
+  // game, clearing data) mutate the shared `teamMode`/`gameIndex` globals, so
+  // running one of those while an earlier write is still in flight can cause
+  // a write to land under the wrong team's storage keys. These guards keep
+  // that from happening.
+  let pendingSaves = 0;
+  let opLock = false;
+  async function waitForPendingSaves(){
+    let guard = 0;
+    while(pendingSaves > 0 && guard < 100){ await new Promise(r=>setTimeout(r,20)); guard++; }
   }
-  async function saveEvents(){
-    evState.updatedAt = Date.now();
-    try{ await window.storage.set(gameEvKey(gameIndex.currentGameId), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+  async function withOpLock(fn){
+    if(opLock){ toast("処理中です。少し待ってからもう一度お試しください"); return; }
+    opLock = true;
+    try{
+      await waitForPendingSaves();
+      await fn();
+    } finally {
+      opLock = false;
+    }
   }
 
-  async function switchToGame(id){
+  async function switchTeamModeInner(mode){
+    if(mode === teamMode) return;
+    await saveMeta(); // flush the outgoing team's state before switching away
+    teamMode = mode;
+    try{ await window.storage.set(TEAM_MODE_KEY, JSON.stringify({mode}), false); }catch(e){ /* ignore */ }
+    ready = false;
+    selectedPlayer = null;
+    modal = null;
+    render();
+    await loadCurrentTeamData({initial:false});
+  }
+  function switchTeamMode(mode){ return withOpLock(()=>switchTeamModeInner(mode)); }
+
+  async function saveMeta(){
+    pendingSaves++;
+    try{
+      meta.updatedAt = Date.now();
+      syncIndexEntry();
+      try{ await window.storage.set(gameMetaKey(gameIndex.currentGameId), JSON.stringify(meta), false); }catch(e){ console.error(e); }
+      await saveIndex();
+    } finally {
+      pendingSaves--;
+    }
+  }
+  async function saveEvents(){
+    pendingSaves++;
+    try{
+      evState.updatedAt = Date.now();
+      try{ await window.storage.set(gameEvKey(gameIndex.currentGameId), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+    } finally {
+      pendingSaves--;
+    }
+  }
+
+  async function switchToGameInner(id){
     if(id === gameIndex.currentGameId) return;
     let m = null, ev = null;
     try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
     meta = m || freshMeta();
-    if(!meta.sheetUrl) meta.sheetUrl = DEFAULT_SHEET_URL;
-    if(meta.teamName === "自チーム") meta.teamName = "B☆Bキッズ";
+    if(!meta.sheetUrl) meta.sheetUrl = TEAM_DEFAULTS[teamMode].sheetUrl;
+    if(meta.teamName === "自チーム") meta.teamName = TEAM_DEFAULTS[teamMode].teamName;
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
     if(!meta.onCourtByQuarter) migrateOnCourt();
     evState = ev || { events: [], updatedAt: 0 };
@@ -468,8 +551,9 @@ if (!window.storage) {
     render();
     toast(`「${gameLabel(meta)}」に切り替えました`);
   }
+  function switchToGame(id){ return withOpLock(()=>switchToGameInner(id)); }
 
-  async function createNewGame(date, gameNumber){
+  async function createNewGameInner(date, gameNumber){
     const id = newGameId();
     meta = freshMeta(date, gameNumber);
     evState = { events: [], updatedAt: 0 };
@@ -484,8 +568,9 @@ if (!window.storage) {
     render();
     toast("新しい試合を作成しました");
   }
+  function createNewGame(date, gameNumber){ return withOpLock(()=>createNewGameInner(date, gameNumber)); }
 
-  async function deleteGame(id){
+  async function deleteGameInner(id){
     if(gameIndex.games.length <= 1){ toast("最後の1件は削除できません"); return; }
     const wasCurrent = id === gameIndex.currentGameId;
     gameIndex.games = gameIndex.games.filter(g => g.id !== id);
@@ -494,18 +579,19 @@ if (!window.storage) {
     if(wasCurrent){
       const next = gameIndex.games[0];
       await saveIndex();
-      await switchToGame(next.id);
+      await switchToGameInner(next.id);
     }else{
       await saveIndex();
       render();
     }
   }
+  function deleteGame(id){ return withOpLock(()=>deleteGameInner(id)); }
 
   // Wipes every game's data from this device/browser and starts over with a
   // single brand-new game. Used by the "全データを一括削除" button in Setup.
   // Wipes every game's data (scores, records, game history) from this device,
   // but keeps the player roster (number + name) so it doesn't need re-entering.
-  async function clearAllData(){
+  async function clearAllDataInner(){
     const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
     const preservedSheetUrl = meta && meta.sheetUrl ? meta.sheetUrl : null;
 
@@ -513,7 +599,7 @@ if (!window.storage) {
       try{ await window.storage.delete(gameMetaKey(g.id), false); }catch(e){ /* ignore */ }
       try{ await window.storage.delete(gameEvKey(g.id), false); }catch(e){ /* ignore */ }
     }
-    try{ await window.storage.delete(INDEX_KEY, false); }catch(e){ /* ignore */ }
+    try{ await window.storage.delete(indexKey(), false); }catch(e){ /* ignore */ }
     try{ await window.storage.delete(LEGACY_META_KEY, false); }catch(e){ /* ignore */ }
     try{ await window.storage.delete(LEGACY_EV_KEY, false); }catch(e){ /* ignore */ }
 
@@ -534,6 +620,7 @@ if (!window.storage) {
     render();
     toast("選手登録・STATSシートURLは残したまま、その他のデータを削除しました");
   }
+  function clearAllData(){ return withOpLock(clearAllDataInner); }
 
   // ---------- stat helpers ----------
   const STAT_TYPES = {
@@ -716,6 +803,34 @@ if (!window.storage) {
     const arr = meta.roster;
     [arr[i], arr[j]] = [arr[j], arr[i]];
     saveMeta(); render();
+  }
+
+  // Bulk roster import: one "<number><tab or spaces><name>" per line.
+  function parseRosterLines(text){
+    return text.split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => {
+        const m = line.match(/^(\S+)\s+(.+)$/);
+        if(!m) return null;
+        return { id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:m[1].trim(), name:m[2].trim() };
+      })
+      .filter(Boolean);
+  }
+  function bulkImportRoster(text, mode){ // mode: "replace" | "append"
+    const parsed = parseRosterLines(text);
+    if(parsed.length === 0){
+      toast("有効な行がありませんでした（背番号→名前の順で1行ずつ入力してください）");
+      return;
+    }
+    if(mode === "replace"){
+      meta.roster = parsed;
+      meta.onCourtByQuarter = { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] };
+    }else{
+      meta.roster = meta.roster.concat(parsed);
+    }
+    saveMeta(); render();
+    toast(`${parsed.length}名を${mode==="replace" ? "置き換えました" : "追加しました"}`);
   }
   function setOnCourt(slotIdx, playerId){
     const arr = currentOnCourt();
@@ -912,6 +1027,15 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
+      <div class="bb-section-title">チーム区分</div>
+      <div class="bb-card">
+        <div class="bb-row" style="gap:8px;">
+          <button class="bb-btn ${teamMode==='boys' ? '' : 'secondary'}" id="bbModeBoys" style="flex:1;">男子</button>
+          <button class="bb-btn ${teamMode==='girls' ? '' : 'secondary'}" id="bbModeGirls" style="flex:1;">女子</button>
+        </div>
+        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px;">男子・女子はそれぞれ完全に別のデータ（試合・選手・記録）として保存されます。切り替えても混ざりません。</div>
+      </div>
+
       <div class="bb-section-title">試合</div>
       <div class="bb-card">
         <div class="bb-row" style="margin-bottom:10px;">
@@ -964,6 +1088,18 @@ if (!window.storage) {
         }
       </div>
       <div style="font-size:11px; color:var(--chalk-dim); margin-top:6px; margin-bottom:10px;">▲▼ で並び順を変更できます（スプレッドシートの行順に対応）。変更時は確認画面が出ます。</div>
+
+      <div class="bb-section-title">選手の一括インポート</div>
+      <div class="bb-card">
+        <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:8px;">
+          「背番号 ＋ タブまたはスペース ＋ 選手名」を1行ずつ貼り付けてください（年度の入れ替え等に）。
+        </div>
+        <textarea id="bbBulkImportText" placeholder="4&#9;しの&#10;5&#9;みほ&#10;6&#9;みさき" style="width:100%; height:110px; background:var(--ink); color:var(--chalk); border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; font-family:monospace;"></textarea>
+        <div class="bb-row" style="gap:8px; margin-top:8px;">
+          <button class="bb-btn secondary" id="bbBulkAppend" style="flex:1;">末尾に追加する</button>
+          <button class="bb-btn danger" id="bbBulkReplace" style="flex:1;">この内容に置き換える</button>
+        </div>
+      </div>
 
       <div class="bb-section-title">この端末のデータ</div>
       <div class="bb-card">
@@ -1278,6 +1414,24 @@ if (!window.storage) {
           </div>
         </div>`;
     }
+    if(modal.type === "confirmBulkImport"){
+      const parsed = parseRosterLines(modal.text);
+      const preview = parsed.slice(0, 6).map(p => `#${esc(p.number)} ${esc(p.name)}`).join("、") + (parsed.length > 6 ? ` 他${parsed.length-6}名` : "");
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>選手一覧を置き換えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              現在の選手登録（${meta.roster.length}名）を、貼り付けた${parsed.length}名に<b>丸ごと置き換えます</b>。この操作は取り消せません。<br/><br/>
+              ${parsed.length ? esc(preview) : '<span style="color:var(--whistle);">有効な行が見つかりませんでした</span>'}
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelBulkImport" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmBulkImport" style="flex:1;" ${parsed.length?"":"disabled"}>置き換える</button>
+            </div>
+          </div>
+        </div>`;
+    }
     if(modal.type === "confirmDeleteLog"){
       const e = evState.events.find(ev=>ev.id===modal.id);
       const p = e ? playerName(e.playerId) : null;
@@ -1432,6 +1586,22 @@ if (!window.storage) {
       if(newGameBtn) newGameBtn.addEventListener("click", ()=>{ modal = {type:"newGame"}; render(); });
       const clearAllBtn = document.getElementById("bbClearAll");
       if(clearAllBtn) clearAllBtn.addEventListener("click", ()=>{ modal = {type:"confirmClearAll"}; render(); });
+      const modeBoysBtn = document.getElementById("bbModeBoys");
+      if(modeBoysBtn) modeBoysBtn.addEventListener("click", ()=> switchTeamMode("boys"));
+      const modeGirlsBtn = document.getElementById("bbModeGirls");
+      if(modeGirlsBtn) modeGirlsBtn.addEventListener("click", ()=> switchTeamMode("girls"));
+      const bulkAppendBtn = document.getElementById("bbBulkAppend");
+      if(bulkAppendBtn) bulkAppendBtn.addEventListener("click", ()=>{
+        const text = document.getElementById("bbBulkImportText").value;
+        bulkImportRoster(text, "append");
+      });
+      const bulkReplaceBtn = document.getElementById("bbBulkReplace");
+      if(bulkReplaceBtn) bulkReplaceBtn.addEventListener("click", ()=>{
+        const text = document.getElementById("bbBulkImportText").value;
+        if(!text.trim()){ toast("テキストが入力されていません"); return; }
+        modal = {type:"confirmBulkImport", text};
+        render();
+      });
     }
 
     if(tab==="game"){
@@ -1607,6 +1777,16 @@ if (!window.storage) {
         if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
           modal = null;
           clearAllData();
+        });
+      }
+      if(modal.type === "confirmBulkImport"){
+        const cancelBtn = document.getElementById("bbCancelBulkImport");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmBulkImport");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const text = modal.text;
+          modal = null;
+          bulkImportRoster(text, "replace");
         });
       }
       if(modal.type === "opponent"){
