@@ -997,7 +997,11 @@ if (!window.storage) {
       <div class="bb-header">
         <div class="bb-header-top">
           <div class="bb-title bb-display"><img src="${LOGO_DATA_URI}" alt="logo" style="height:22px; width:22px; vertical-align:middle; border-radius:50%; margin-right:5px; object-fit:cover;"/>スタッツ入力支援ツール</div>
-          <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
+            <a href="https://docs.google.com/document/d/1JsNI6sJe2ScpBxmB4dzCbfgPricvJJncyzSE4BT8K-I/edit?tab=t.0#heading=h.8p5rw0gcurfh" target="_blank" rel="noopener" title="マニュアル" style="text-decoration:none; opacity:0.55; font-size:13px;">📖</a>
+            <a href="https://www.youtube.com/watch?v=HAFrml2R5yI" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
+          </div>
         </div>
         <div class="bb-scorebug">
           <div class="bb-team-block">
