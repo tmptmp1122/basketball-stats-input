@@ -507,6 +507,7 @@ if (!window.storage) {
   // but keeps the player roster (number + name) so it doesn't need re-entering.
   async function clearAllData(){
     const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
+    const preservedSheetUrl = meta && meta.sheetUrl ? meta.sheetUrl : null;
 
     for(const g of gameIndex.games){
       try{ await window.storage.delete(gameMetaKey(g.id), false); }catch(e){ /* ignore */ }
@@ -519,6 +520,7 @@ if (!window.storage) {
     const id = newGameId();
     meta = freshMeta();
     meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
+    if(preservedSheetUrl) meta.sheetUrl = preservedSheetUrl;
     evState = { events: [], updatedAt: 0 };
     gameIndex = { currentGameId: id, games: [] };
     syncIndexEntry();
@@ -530,7 +532,7 @@ if (!window.storage) {
     ready = true;
     tab = meta.roster.length ? "game" : "setup";
     render();
-    toast("選手登録は残したまま、その他のデータを削除しました");
+    toast("選手登録・STATSシートURLは残したまま、その他のデータを削除しました");
   }
 
   // ---------- stat helpers ----------
@@ -965,8 +967,8 @@ if (!window.storage) {
 
       <div class="bb-section-title">この端末のデータ</div>
       <div class="bb-card">
-        <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:10px;">すべての試合・記録・スタッツをこの端末から削除します（<b>選手登録は残ります</b>）。大事な記録は先にスプレッドシートにコピーしておいてください。</div>
-        <button class="bb-btn danger" id="bbClearAll" style="width:100%;">全データを一括削除（選手登録は残す）</button>
+        <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:10px;">すべての試合・記録・スタッツをこの端末から削除します（<b>選手登録・STATSシートURLは残ります</b>）。大事な記録は先にスプレッドシートにコピーしておいてください。</div>
+        <button class="bb-btn danger" id="bbClearAll" style="width:100%;">全データを一括削除（選手登録・URLは残す）</button>
       </div>`;
   }
 
@@ -1267,7 +1269,7 @@ if (!window.storage) {
           <div class="bb-modal">
             <div class="bb-modal-head"><h3>全データを削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
             <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              この端末に保存されている<b>すべての試合・記録・スタッツ</b>が削除されます。<b>選手登録（背番号・名前）は残ります。</b>この操作は取り消せません。大事な記録は先にスプレッドシートへコピーしておいてください。
+              この端末に保存されている<b>すべての試合・記録・スタッツ</b>が削除されます。<b>選手登録（背番号・名前）・STATSシートURLは残ります。</b>この操作は取り消せません。大事な記録は先にスプレッドシートへコピーしておいてください。
             </div>
             <div class="bb-row" style="gap:8px;">
               <button class="bb-btn secondary" id="bbCancelClearAll" style="flex:1;">キャンセル</button>
@@ -1313,13 +1315,13 @@ if (!window.storage) {
         </div>`;
     if(selectedPlayer === OWNGOAL_ID){
       // Own goal isn't a teammate — only points count, no AST/REB/STL/BLK/FOUL.
+      // 1点(フリースロー)は起こり得ないため対象外。
       return `
       <div class="bb-actionbar">
         ${whoLine}
         <div class="bb-grid">
           <button class="bb-stat-btn make" data-og-score="2" style="grid-column: span 2;">2点</button>
           <button class="bb-stat-btn make" data-og-score="3" style="grid-column: span 2;">3点</button>
-          <button class="bb-stat-btn ft" data-og-score="1" style="grid-column: span 4;">1点</button>
         </div>
       </div>`;
     }
@@ -1485,7 +1487,6 @@ if (!window.storage) {
           const v = el.getAttribute("data-og-score");
           if(v === "2") addEvent(selectedPlayer, "2m");
           else if(v === "3") addEvent(selectedPlayer, "3m");
-          else if(v === "1") addFreeThrowEvent(selectedPlayer, 1, 1);
         });
       });
     }
