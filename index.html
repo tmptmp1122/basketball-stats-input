@@ -66,6 +66,12 @@
   }
   .bb-header-top{display:flex; justify-content:space-between; align-items:center; gap:8px;}
   .bb-title{font-size:13px; letter-spacing:0.08em; color:var(--maple-bright);}
+  .bb-team-toggle{ display:flex; gap:8px; margin-top:10px; }
+  .bb-team-toggle-btn{
+    flex:1; background:var(--panel); border:1.5px solid var(--line); color:var(--chalk-dim);
+    font-size:15px; font-weight:800; padding:10px 0; border-radius:12px; cursor:pointer;
+  }
+  .bb-team-toggle-btn.active{ background:var(--maple); border-color:var(--maple); color:#1b1105; }
   .bb-scorebug{
     display:flex; align-items:center; justify-content:space-between;
     margin-top:4px; padding:2px 4px;
@@ -998,11 +1004,11 @@ if (!window.storage) {
         <div class="bb-header-top">
           <div class="bb-title bb-display"><img src="${LOGO_DATA_URI}" alt="logo" style="height:22px; width:22px; vertical-align:middle; border-radius:50%; margin-right:5px; object-fit:cover;"/>スタッツ入力支援ツール</div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <div style="font-size:11px; color:var(--chalk-dim);">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
             <a href="https://docs.google.com/document/d/1JsNI6sJe2ScpBxmB4dzCbfgPricvJJncyzSE4BT8K-I/edit?tab=t.0#heading=h.8p5rw0gcurfh" target="_blank" rel="noopener" title="マニュアル" style="text-decoration:none; opacity:0.55; font-size:13px;">📖</a>
             <a href="https://www.youtube.com/watch?v=HAFrml2R5yI" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
           </div>
         </div>
+        <div style="font-size:11px; color:var(--chalk-dim); text-align:right; margin-top:4px;">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
         <div class="bb-scorebug">
           <div class="bb-team-block">
             <div class="bb-team-name">${esc(meta.teamName)}</div>
@@ -1013,6 +1019,10 @@ if (!window.storage) {
             <div class="bb-team-name">${esc(meta.opponentName)}</div>
             <div class="bb-score bb-mono">${opp}</div>
           </div>
+        </div>
+        <div class="bb-team-toggle">
+          <button class="bb-team-toggle-btn ${teamMode==='boys' ? 'active' : ''}" id="bbHeaderModeBoys">男子</button>
+          <button class="bb-team-toggle-btn ${teamMode==='girls' ? 'active' : ''}" id="bbHeaderModeGirls">女子</button>
         </div>
       </div>`;
   }
@@ -1031,16 +1041,8 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
-      <div class="bb-section-title">チーム区分</div>
-      <div class="bb-card">
-        <div class="bb-row" style="gap:8px;">
-          <button class="bb-btn ${teamMode==='boys' ? '' : 'secondary'}" id="bbModeBoys" style="flex:1;">男子</button>
-          <button class="bb-btn ${teamMode==='girls' ? '' : 'secondary'}" id="bbModeGirls" style="flex:1;">女子</button>
-        </div>
-        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px;">男子・女子はそれぞれ完全に別のデータ（試合・選手・記録）として保存されます。切り替えても混ざりません。</div>
-      </div>
-
       <div class="bb-section-title">試合</div>
+      <div style="font-size:11px; color:var(--chalk-dim); margin:-4px 0 8px;">「男子／女子」の切り替えは画面上部のヘッダーから行えます。それぞれ完全に別のデータとして保存されます。</div>
       <div class="bb-card">
         <div class="bb-row" style="margin-bottom:10px;">
           <div style="flex:1;">
@@ -1575,6 +1577,10 @@ if (!window.storage) {
     document.querySelectorAll("[data-q]").forEach(el=>{
       el.addEventListener("click", ()=> setQuarter(Number(el.getAttribute("data-q"))));
     });
+    const headerModeBoys = document.getElementById("bbHeaderModeBoys");
+    if(headerModeBoys) headerModeBoys.addEventListener("click", ()=> switchTeamMode("boys"));
+    const headerModeGirls = document.getElementById("bbHeaderModeGirls");
+    if(headerModeGirls) headerModeGirls.addEventListener("click", ()=> switchTeamMode("girls"));
 
     if(tab==="setup"){
       const teamName = document.getElementById("bbTeamName");
@@ -1593,10 +1599,10 @@ if (!window.storage) {
         modal = {type:"confirmClearSheetUrl"};
         render();
       });
-      if(teamName) teamName.addEventListener("change", ()=>{ meta.teamName=teamName.value; saveMeta(); });
-      if(oppName) oppName.addEventListener("change", ()=>{ meta.opponentName=oppName.value; saveMeta(); });
-      if(date) date.addEventListener("change", ()=>{ meta.date=date.value; saveMeta(); });
-      if(gameNumber) gameNumber.addEventListener("change", ()=>{ meta.gameNumber=Math.max(1, Number(gameNumber.value)||1); saveMeta(); });
+      if(teamName) teamName.addEventListener("change", ()=>{ meta.teamName=teamName.value; saveMeta(); render(); });
+      if(oppName) oppName.addEventListener("change", ()=>{ meta.opponentName=oppName.value; saveMeta(); render(); });
+      if(date) date.addEventListener("change", ()=>{ meta.date=date.value; saveMeta(); render(); });
+      if(gameNumber) gameNumber.addEventListener("change", ()=>{ meta.gameNumber=Math.max(1, Number(gameNumber.value)||1); saveMeta(); render(); });
       const addBtn = document.getElementById("bbAddPlayer");
       if(addBtn) addBtn.addEventListener("click", ()=>{
         const num = document.getElementById("bbNewNum");
@@ -1622,10 +1628,6 @@ if (!window.storage) {
       if(newGameBtn) newGameBtn.addEventListener("click", ()=>{ modal = {type:"newGame"}; render(); });
       const clearAllBtn = document.getElementById("bbClearAll");
       if(clearAllBtn) clearAllBtn.addEventListener("click", ()=>{ modal = {type:"confirmClearAll"}; render(); });
-      const modeBoysBtn = document.getElementById("bbModeBoys");
-      if(modeBoysBtn) modeBoysBtn.addEventListener("click", ()=> switchTeamMode("boys"));
-      const modeGirlsBtn = document.getElementById("bbModeGirls");
-      if(modeGirlsBtn) modeGirlsBtn.addEventListener("click", ()=> switchTeamMode("girls"));
       const bulkAppendBtn = document.getElementById("bbBulkAppend");
       if(bulkAppendBtn) bulkAppendBtn.addEventListener("click", ()=>{
         const text = document.getElementById("bbBulkImportText").value;
@@ -1913,6 +1915,22 @@ if (!window.storage) {
       }
     }
   }
+
+  // ---------- keep the screen awake while this app is open ----------
+  let wakeLock = null;
+  async function requestWakeLock(){
+    if(!("wakeLock" in navigator)) return; // unsupported browser — silently skip
+    try{
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }catch(e){ /* permission denied, battery saver, etc. — ignore */ }
+  }
+  document.addEventListener("visibilitychange", () => {
+    // The OS/browser releases the lock whenever the tab is hidden (switching
+    // apps, locking manually, etc.) — re-request it once the user comes back.
+    if(document.visibilityState === "visible" && !wakeLock) requestWakeLock();
+  });
+  requestWakeLock();
 
   loadApp();
 })();
