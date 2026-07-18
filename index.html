@@ -193,6 +193,7 @@
   .bb-modal-close{background:none; border:none; color:var(--chalk-dim); font-size:20px; cursor:pointer;}
 
   .bb-edit-row{border-bottom:1px solid var(--line); padding:8px 0;}
+  .bb-edit-row.flagged{ background:rgba(216,72,58,0.12); border-radius:6px; padding-left:6px; padding-right:6px; }
   .bb-edit-row-top{display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--chalk-dim); margin-bottom:6px;}
   .bb-edit-row-controls{display:flex; gap:6px;}
   .bb-edit-select{
@@ -236,13 +237,19 @@
     flex:1; overflow-y:auto; min-height:0;
   }
   .bb-live-log-item{
-    display:flex; align-items:baseline; gap:8px; font-size:12px; padding:4px 0;
+    display:flex; align-items:baseline; gap:8px; font-size:12px; padding:4px 2px;
     border-bottom:1px solid var(--line);
   }
   .bb-live-log-item:last-child{border-bottom:none;}
+  .bb-live-log-item.flagged{ background:rgba(216,72,58,0.12); border-radius:6px; }
   .bb-live-log-time{color:var(--chalk-dim); font-variant-numeric:tabular-nums; flex-shrink:0; font-size:11px;}
   .bb-live-log-who{color:var(--gold); font-weight:700; flex-shrink:0;}
-  .bb-live-log-what{color:var(--chalk); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .bb-live-log-what{color:var(--chalk); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;}
+  .bb-flag-btn{
+    background:none; border:none; cursor:pointer; font-size:14px; flex-shrink:0;
+    opacity:0.3; filter:grayscale(1); padding:0 2px; line-height:1;
+  }
+  .bb-flag-btn.active{ opacity:1; filter:none; }
 
   /* stats table */
   .bb-table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius);}
@@ -727,6 +734,16 @@ if (!window.storage) {
     render();
   }
 
+  // Marks/unmarks a record as "気になる" (suspicious/uncertain) so it can be
+  // found and double-checked later, without having to verify it mid-game.
+  function toggleFlag(id){
+    const e = evState.events.find(e=>e.id===id);
+    if(!e) return;
+    e.flagged = !e.flagged;
+    saveEvents();
+    render();
+  }
+
   function computeStats(playerId){
     const evs = evState.events.filter(e => e.playerId === playerId);
     const s = {q:{1:0,2:0,3:0,4:0}, m2:0,a2:0, m3:0,a3:0, mft:0,aft:0, ast:0,reb:0,stl:0,blk:0, pfByQ:[], quarters:new Set()};
@@ -1147,6 +1164,7 @@ if (!window.storage) {
     }).join("");
 
     const logCount = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").length;
+    const flaggedCount = evState.events.filter(e=>e.flagged).length;
     const ogStats = computeStats(OWNGOAL_ID);
     const ogSel = selectedPlayer===OWNGOAL_ID ? "selected" : "";
 
@@ -1156,7 +1174,7 @@ if (!window.storage) {
       </div>
       <div class="bb-game-toolbar">
         <button class="bb-chip-btn" id="bbOpenOpp">相手チーム 得点 (計${oppTotalScore()})</button>
-        <button class="bb-chip-btn" id="bbOpenLog">記録一覧・訂正（${logCount}件）</button>
+        <button class="bb-chip-btn" id="bbOpenLog">記録一覧・訂正（${logCount}件${flaggedCount ? ` ・🚩${flaggedCount}` : ""}）</button>
       </div>
       <div class="bb-court-grid">${courtTiles}</div>
       <div class="bb-tile ${ogSel}" data-select="${OWNGOAL_ID}" style="margin-top:6px; min-height:auto; padding:6px 10px; display:flex; flex-direction:row; align-items:center; justify-content:space-between;">
@@ -1175,17 +1193,19 @@ if (!window.storage) {
   function renderLiveLogPanel(){
     if(meta.roster.length===0) return "";
     const evs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
+    const flaggedCount = evState.events.filter(e=>e.flagged).length;
     const rows = evs.length===0 ? '<div class="bb-empty" style="padding:10px 0;">まだ記録がありません</div>' : evs.map(e=>{
       const p = playerName(e.playerId);
-      return `<div class="bb-live-log-item">
+      return `<div class="bb-live-log-item ${e.flagged ? 'flagged' : ''}">
         <span class="bb-live-log-time">${formatTime(e.ts)}</span>
         <span class="bb-live-log-who">${e.quarter}Q #${esc(p.number)} ${esc(p.name)}</span>
         <span class="bb-live-log-what">${esc(eventLabel(e))}</span>
+        <button class="bb-flag-btn ${e.flagged ? 'active' : ''}" data-toggle-flag="${e.id}" title="気になる記録としてマーク">🚩</button>
       </div>`;
     }).join("");
     return `
       <div class="bb-live-log-panel">
-        <div class="bb-live-log-title">最近の記録（新しい順）</div>
+        <div class="bb-live-log-title">最近の記録（新しい順）${flaggedCount ? ` ・ 🚩気になる記録 ${flaggedCount}件` : ""}</div>
         <div class="bb-live-log">${rows}</div>
       </div>
     `;
@@ -1229,10 +1249,19 @@ if (!window.storage) {
         </div>`;
     }
     if(modal.type === "log"){
-      const evs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
-      const rowsHtml = evs.length===0 ? '<div class="bb-empty">まだ記録がありません</div>' : evs.map(e=>`
-        <div class="bb-edit-row">
-          <div class="bb-edit-row-top"><span>${e.quarter}Q・${esc(eventLabel(e))}</span><button class="bb-edit-del" data-ask-log-del="${e.id}">削除</button></div>
+      const onlyFlagged = !!modal.onlyFlagged;
+      const allEvs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
+      const flaggedTotal = allEvs.filter(e=>e.flagged).length;
+      const evs = onlyFlagged ? allEvs.filter(e=>e.flagged) : allEvs;
+      const rowsHtml = evs.length===0 ? `<div class="bb-empty">${onlyFlagged ? "🚩が付いた記録はありません" : "まだ記録がありません"}</div>` : evs.map(e=>`
+        <div class="bb-edit-row ${e.flagged ? 'flagged' : ''}">
+          <div class="bb-edit-row-top">
+            <span>${e.quarter}Q・${esc(eventLabel(e))}</span>
+            <span class="bb-row" style="gap:6px;">
+              <button class="bb-flag-btn ${e.flagged ? 'active' : ''}" data-toggle-flag="${e.id}" title="気になる記録としてマーク">🚩</button>
+              <button class="bb-edit-del" data-ask-log-del="${e.id}">削除</button>
+            </span>
+          </div>
           <div class="bb-edit-row-controls">
             <select class="bb-edit-select" data-log-player="${e.id}">${[...meta.roster, ownGoalPlayer()].map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>
             <select class="bb-edit-select" data-log-type="${e.id}">${Object.keys(STAT_TYPES).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
@@ -1248,6 +1277,9 @@ if (!window.storage) {
         <div class="bb-modal-overlay" id="bbModalOverlay">
           <div class="bb-modal">
             <div class="bb-modal-head"><h3>記録一覧・訂正</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:10px;">
+              <input type="checkbox" id="bbOnlyFlagged" ${onlyFlagged?"checked":""}/> 🚩気になる記録のみ表示${flaggedTotal ? `（${flaggedTotal}件）` : ""}
+            </label>
             ${rowsHtml}
           </div>
         </div>`;
@@ -1646,6 +1678,12 @@ if (!window.storage) {
     }
 
     if(tab==="game"){
+      document.querySelectorAll(".bb-live-log-panel [data-toggle-flag]").forEach(el=>{
+        el.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          toggleFlag(el.getAttribute("data-toggle-flag"));
+        });
+      });
       document.querySelectorAll("[data-select]").forEach(el=>{
         el.addEventListener("click", (e)=>{
           if(e.target.closest("[data-sub-slot]") || e.target.closest("[data-remove-slot]")) return;
@@ -1883,6 +1921,14 @@ if (!window.storage) {
       if(modal.type === "log"){
         document.querySelectorAll("[data-ask-log-del]").forEach(el=>{
           el.addEventListener("click", ()=>{ modal = {type:"confirmDeleteLog", id: el.getAttribute("data-ask-log-del")}; render(); });
+        });
+        document.querySelectorAll("#bbModalOverlay [data-toggle-flag]").forEach(el=>{
+          el.addEventListener("click", ()=> toggleFlag(el.getAttribute("data-toggle-flag")));
+        });
+        const onlyFlaggedCheck = document.getElementById("bbOnlyFlagged");
+        if(onlyFlaggedCheck) onlyFlaggedCheck.addEventListener("change", ()=>{
+          modal = {type:"log", onlyFlagged: onlyFlaggedCheck.checked};
+          render();
         });
         document.querySelectorAll("[data-log-player]").forEach(el=>{
           el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-player"), {playerId: el.value}));
