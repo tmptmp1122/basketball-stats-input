@@ -109,7 +109,7 @@
   .bb-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:10px;}
   .bb-row{display:flex; gap:8px; align-items:center;}
   .bb-input{
-    flex:1; background:var(--ink); border:1px solid var(--line); color:var(--chalk);
+    width:100%; flex:1; background:var(--ink); border:1px solid var(--line); color:var(--chalk);
     padding:10px; border-radius:10px; font-size:15px; min-width:0;
   }
   .bb-input:focus{outline:2px solid var(--maple); border-color:var(--maple);}
@@ -1048,11 +1048,11 @@ if (!window.storage) {
       <div style="font-size:11px; color:var(--chalk-dim); margin:-4px 0 8px;">「男子／女子」の切り替えは画面上部のヘッダーから行えます。それぞれ完全に別のデータとして保存されます。</div>
       <div class="bb-card">
         <div class="bb-row" style="margin-bottom:10px;">
-          <div style="flex:1;">
+          <div style="flex:1; min-width:0;">
             <span class="bb-label">試合日</span>
             <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}"/>
           </div>
-          <div style="flex:1;">
+          <div style="flex:1; min-width:0;">
             <span class="bb-label">第何試合</span>
             <input class="bb-input" id="bbGameNumber" type="number" min="1" value="${esc(meta.gameNumber)}"/>
           </div>
@@ -1401,11 +1401,11 @@ if (!window.storage) {
           <div class="bb-modal">
             <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
             <div class="bb-row" style="margin-bottom:14px;">
-              <div style="flex:1;">
+              <div style="flex:1; min-width:0;">
                 <span class="bb-label">試合日</span>
                 <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(today)}"/>
               </div>
-              <div style="flex:1;">
+              <div style="flex:1; min-width:0;">
                 <span class="bb-label">第何試合</span>
                 <input class="bb-input" id="bbNewGameNumber" type="number" min="1" value="${suggestedNumber}"/>
               </div>
