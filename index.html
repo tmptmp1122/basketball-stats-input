@@ -122,6 +122,11 @@
   .bb-input:focus{outline:2px solid var(--maple); border-color:var(--maple);}
   .bb-label{font-size:11px; color:var(--chalk-dim); margin-bottom:4px; display:block;}
   .bb-stepper{ display:flex; align-items:stretch; gap:6px; }
+  .bb-inline-gamenum{
+    flex:1.1; min-width:0; background:var(--ink); border:1px solid var(--line); border-radius:10px;
+    display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; color:var(--chalk);
+    white-space:nowrap; padding:0 4px;
+  }
   .bb-stepper-btn{
     flex:0 0 40px; background:var(--panel2); border:1px solid var(--line); color:var(--chalk);
     font-size:18px; font-weight:800; border-radius:10px; cursor:pointer;
@@ -1071,18 +1076,13 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
-      <div class="bb-section-title">試合</div>
-      <div style="font-size:11px; color:var(--chalk-dim); margin:-4px 0 8px;">「男子／女子」の切り替えは画面上部のヘッダーから行えます。それぞれ完全に別のデータとして保存されます。</div>
+      <div class="bb-section-title">試合登録・切り替え</div>
       <div class="bb-card">
-        <div class="bb-row" style="margin-bottom:10px;">
-          <div style="flex:1; min-width:0;">
-            <span class="bb-label">試合日</span>
-            <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}"/>
-          </div>
-          <div style="flex:1; min-width:0;">
-            <span class="bb-label">第何試合</span>
-            <input class="bb-input" id="bbGameNumber" type="number" min="1" value="${esc(meta.gameNumber)}"/>
-          </div>
+        <div class="bb-row" style="margin-bottom:10px; align-items:stretch;">
+          <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}" style="flex:1.4; min-width:0;"/>
+          <div class="bb-inline-gamenum">第${meta.gameNumber}試合</div>
+          <button class="bb-stepper-btn" id="bbSetupGameNumUp">＋</button>
+          <button class="bb-stepper-btn" id="bbSetupGameNumDown" ${meta.gameNumber<=1?"disabled":""}>－</button>
         </div>
         <div class="bb-row" style="gap:8px;">
           <button class="bb-btn secondary" id="bbOpenGameSwitch" style="flex:1;">他の試合に切り替える</button>
@@ -1092,10 +1092,16 @@ if (!window.storage) {
 
       <div class="bb-section-title">チーム情報</div>
       <div class="bb-card">
-        <span class="bb-label">自チーム名</span>
-        <input class="bb-input" id="bbTeamName" value="${esc(meta.teamName)}" style="margin-bottom:10px;"/>
-        <span class="bb-label">対戦相手名</span>
-        <input class="bb-input" id="bbOppName" value="${esc(meta.opponentName)}"/>
+        <div class="bb-row">
+          <div style="flex:1; min-width:0;">
+            <span class="bb-label">自チーム名</span>
+            <input class="bb-input" id="bbTeamName" value="${esc(meta.teamName)}"/>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <span class="bb-label">対戦相手名</span>
+            <input class="bb-input" id="bbOppName" value="${esc(meta.opponentName)}"/>
+          </div>
+        </div>
       </div>
 
       <div class="bb-section-title">STATSシートのURL</div>
@@ -1440,19 +1446,11 @@ if (!window.storage) {
         <div class="bb-modal-overlay" id="bbModalOverlay">
           <div class="bb-modal">
             <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div class="bb-row" style="margin-bottom:14px; align-items:flex-start;">
-              <div style="flex:1; min-width:0;">
-                <span class="bb-label">試合日</span>
-                <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}"/>
-              </div>
-              <div style="flex:1; min-width:0;">
-                <span class="bb-label">第何試合</span>
-                <div class="bb-stepper">
-                  <div class="bb-stepper-value">${gameNumber}</div>
-                  <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
-                  <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
-                </div>
-              </div>
+            <div class="bb-row" style="margin-bottom:14px; align-items:stretch;">
+              <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}" style="flex:1.4; min-width:0;"/>
+              <div class="bb-inline-gamenum">第${gameNumber}試合</div>
+              <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
+              <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
             </div>
             <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
             <button class="bb-btn" id="bbCreateGame" style="width:100%;">この内容で作成</button>
@@ -1681,7 +1679,6 @@ if (!window.storage) {
       const teamName = document.getElementById("bbTeamName");
       const oppName = document.getElementById("bbOppName");
       const date = document.getElementById("bbDate");
-      const gameNumber = document.getElementById("bbGameNumber");
       const sheetUrl = document.getElementById("bbSheetUrl");
       const saveSheetUrlBtn = document.getElementById("bbSaveSheetUrl");
       if(saveSheetUrlBtn) saveSheetUrlBtn.addEventListener("click", ()=>{
@@ -1697,7 +1694,16 @@ if (!window.storage) {
       if(teamName) teamName.addEventListener("change", ()=>{ meta.teamName=teamName.value; saveMeta(); render(); });
       if(oppName) oppName.addEventListener("change", ()=>{ meta.opponentName=oppName.value; saveMeta(); render(); });
       if(date) date.addEventListener("change", ()=>{ meta.date=date.value; saveMeta(); render(); });
-      if(gameNumber) gameNumber.addEventListener("change", ()=>{ meta.gameNumber=Math.max(1, Number(gameNumber.value)||1); saveMeta(); render(); });
+      const gameNumUpBtn = document.getElementById("bbSetupGameNumUp");
+      if(gameNumUpBtn) gameNumUpBtn.addEventListener("click", ()=>{
+        meta.gameNumber = (meta.gameNumber||1) + 1;
+        saveMeta(); render();
+      });
+      const gameNumDownBtn = document.getElementById("bbSetupGameNumDown");
+      if(gameNumDownBtn) gameNumDownBtn.addEventListener("click", ()=>{
+        meta.gameNumber = Math.max(1, (meta.gameNumber||1) - 1);
+        saveMeta(); render();
+      });
       const addBtn = document.getElementById("bbAddPlayer");
       if(addBtn) addBtn.addEventListener("click", ()=>{
         const num = document.getElementById("bbNewNum");
@@ -1720,7 +1726,11 @@ if (!window.storage) {
       const openSwitch = document.getElementById("bbOpenGameSwitch");
       if(openSwitch) openSwitch.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
       const newGameBtn = document.getElementById("bbNewGame");
-      if(newGameBtn) newGameBtn.addEventListener("click", ()=>{ modal = {type:"newGame"}; render(); });
+      if(newGameBtn) newGameBtn.addEventListener("click", ()=>{
+        const d = todayLocal();
+        modal = {type:"newGame", date: d, gameNumber: suggestedGameNumber(d)};
+        render();
+      });
       const clearAllBtn = document.getElementById("bbClearAll");
       if(clearAllBtn) clearAllBtn.addEventListener("click", ()=>{ modal = {type:"confirmClearAll"}; render(); });
       const bulkAppendBtn = document.getElementById("bbBulkAppend");
