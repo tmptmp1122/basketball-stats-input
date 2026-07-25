@@ -121,6 +121,16 @@
   }
   .bb-input:focus{outline:2px solid var(--maple); border-color:var(--maple);}
   .bb-label{font-size:11px; color:var(--chalk-dim); margin-bottom:4px; display:block;}
+  .bb-stepper{ display:flex; align-items:stretch; gap:6px; }
+  .bb-stepper-btn{
+    flex:0 0 40px; background:var(--panel2); border:1px solid var(--line); color:var(--chalk);
+    font-size:18px; font-weight:800; border-radius:10px; cursor:pointer;
+  }
+  .bb-stepper-btn[disabled]{ opacity:0.35; }
+  .bb-stepper-value{
+    flex:1; background:var(--ink); border:1px solid var(--line); border-radius:10px;
+    display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; color:var(--chalk);
+  }
   .bb-btn{
     background:var(--maple); color:#1b1105; border:none; padding:10px 16px; border-radius:10px;
     font-weight:800; font-size:14px; cursor:pointer; white-space:nowrap;
@@ -563,6 +573,11 @@ if (!window.storage) {
     toast(`「${gameLabel(meta)}」に切り替えました`);
   }
   function switchToGame(id){ return withOpLock(()=>switchToGameInner(id)); }
+
+  function suggestedGameNumber(date){
+    const sameDay = gameIndex.games.filter(g => g.date === date);
+    return sameDay.length ? Math.max(...sameDay.map(g=>g.gameNumber||1)) + 1 : 1;
+  }
 
   async function createNewGameInner(date, gameNumber){
     const id = newGameId();
@@ -1418,21 +1433,24 @@ if (!window.storage) {
         </div>`;
     }
     if(modal.type === "newGame"){
-      const today = todayLocal();
-      const sameDay = gameIndex.games.filter(g => g.date === today);
-      const suggestedNumber = sameDay.length ? Math.max(...sameDay.map(g=>g.gameNumber||1)) + 1 : 1;
+      const date = modal.date || todayLocal();
+      const gameNumber = modal.gameNumber || suggestedGameNumber(date);
       return `
         <div class="bb-modal-overlay" id="bbModalOverlay">
           <div class="bb-modal">
             <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div class="bb-row" style="margin-bottom:14px;">
+            <div class="bb-row" style="margin-bottom:14px; align-items:flex-start;">
               <div style="flex:1; min-width:0;">
                 <span class="bb-label">試合日</span>
-                <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(today)}"/>
+                <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}"/>
               </div>
               <div style="flex:1; min-width:0;">
                 <span class="bb-label">第何試合</span>
-                <input class="bb-input" id="bbNewGameNumber" type="number" min="1" value="${suggestedNumber}"/>
+                <div class="bb-stepper">
+                  <div class="bb-stepper-value">${gameNumber}</div>
+                  <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
+                  <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
+                </div>
               </div>
             </div>
             <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
@@ -1834,10 +1852,29 @@ if (!window.storage) {
         });
       }
       if(modal.type === "newGame"){
+        const dateInput = document.getElementById("bbNewGameDate");
+        if(dateInput) dateInput.addEventListener("change", ()=>{
+          modal = {type:"newGame", date: dateInput.value};
+          render();
+        });
+        const downBtn = document.getElementById("bbGameNumDown");
+        if(downBtn) downBtn.addEventListener("click", ()=>{
+          const date = modal.date || todayLocal();
+          const current = modal.gameNumber || suggestedGameNumber(date);
+          modal = {type:"newGame", date, gameNumber: Math.max(1, current-1)};
+          render();
+        });
+        const upBtn = document.getElementById("bbGameNumUp");
+        if(upBtn) upBtn.addEventListener("click", ()=>{
+          const date = modal.date || todayLocal();
+          const current = modal.gameNumber || suggestedGameNumber(date);
+          modal = {type:"newGame", date, gameNumber: current+1};
+          render();
+        });
         const createBtn = document.getElementById("bbCreateGame");
         if(createBtn) createBtn.addEventListener("click", ()=>{
-          const date = document.getElementById("bbNewGameDate").value;
-          const num = Math.max(1, Number(document.getElementById("bbNewGameNumber").value)||1);
+          const date = modal.date || todayLocal();
+          const num = modal.gameNumber || suggestedGameNumber(date);
           modal = null;
           createNewGame(date, num);
         });
