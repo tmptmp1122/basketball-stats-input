@@ -1036,7 +1036,7 @@ if (!window.storage) {
           <div style="display:flex; align-items:center; gap:8px;">
             <div style="font-size:10px; color:var(--chalk-dim); white-space:nowrap;">${esc(meta.date)} 第${esc(meta.gameNumber)}試合</div>
             <a href="https://docs.google.com/document/d/1JsNI6sJe2ScpBxmB4dzCbfgPricvJJncyzSE4BT8K-I/edit?tab=t.0#heading=h.8p5rw0gcurfh" target="_blank" rel="noopener" title="マニュアル" style="text-decoration:none; opacity:0.55; font-size:13px;">📖</a>
-            <a href="https://www.youtube.com/watch?v=HAFrml2R5yI" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
+            <a href="https://youtu.be/5gukjUI8nUU" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
           </div>
         </div>
         <div class="bb-scorebug">
@@ -1231,7 +1231,7 @@ if (!window.storage) {
       return `
         <div class="bb-modal-overlay" id="bbModalOverlay">
           <div class="bb-modal">
-            <div class="bb-modal-head"><h3>交代で入る選手を選択</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-modal-head"><h3>${modal.isInitial ? "出場する選手を選択" : "交代で入る選手を選択"}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
             <div class="bb-bench-list">${benchHtml}</div>
           </div>
         </div>`;
@@ -1754,7 +1754,7 @@ if (!window.storage) {
       document.querySelectorAll("[data-sub-slot]").forEach(el=>{
         el.addEventListener("click", (e)=>{
           e.stopPropagation();
-          modal = {type:"sub", slot: Number(el.getAttribute("data-sub-slot"))};
+          modal = {type:"sub", slot: Number(el.getAttribute("data-sub-slot")), isInitial:false};
           render();
         });
       });
@@ -1767,7 +1767,7 @@ if (!window.storage) {
       });
       document.querySelectorAll("[data-empty]").forEach(el=>{
         el.addEventListener("click", ()=>{
-          modal = {type:"sub", slot: Number(el.getAttribute("data-slot"))};
+          modal = {type:"sub", slot: Number(el.getAttribute("data-slot")), isInitial:true};
           render();
         });
       });
