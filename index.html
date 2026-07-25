@@ -584,6 +584,29 @@ if (!window.storage) {
     return sameDay.length ? Math.max(...sameDay.map(g=>g.gameNumber||1)) + 1 : 1;
   }
 
+  // Game numbers already used by OTHER games on this date (excludeGameId lets a
+  // game being edited ignore its own current number when checking for clashes).
+  function usedGameNumbers(date, excludeGameId){
+    return new Set(
+      gameIndex.games
+        .filter(g => g.date === date && g.id !== excludeGameId)
+        .map(g => g.gameNumber)
+    );
+  }
+  // Steps a game number up/down, skipping any value already used on that date
+  // (by a different game), so duplicates can never be selected via the stepper.
+  function stepGameNumber(current, direction, date, excludeGameId){
+    const used = usedGameNumbers(date, excludeGameId);
+    let next = current;
+    let guard = 0;
+    do{
+      next += direction;
+      guard++;
+    }while(next >= 1 && used.has(next) && guard < 200);
+    if(next < 1) return current; // nothing lower available — stay put
+    return next;
+  }
+
   async function createNewGameInner(date, gameNumber){
     const id = newGameId();
     meta = freshMeta(date, gameNumber);
@@ -1693,15 +1716,20 @@ if (!window.storage) {
       });
       if(teamName) teamName.addEventListener("change", ()=>{ meta.teamName=teamName.value; saveMeta(); render(); });
       if(oppName) oppName.addEventListener("change", ()=>{ meta.opponentName=oppName.value; saveMeta(); render(); });
-      if(date) date.addEventListener("change", ()=>{ meta.date=date.value; saveMeta(); render(); });
+      if(date) date.addEventListener("change", ()=>{
+        meta.date = date.value;
+        const used = usedGameNumbers(meta.date, gameIndex.currentGameId);
+        if(used.has(meta.gameNumber)) meta.gameNumber = suggestedGameNumber(meta.date);
+        saveMeta(); render();
+      });
       const gameNumUpBtn = document.getElementById("bbSetupGameNumUp");
       if(gameNumUpBtn) gameNumUpBtn.addEventListener("click", ()=>{
-        meta.gameNumber = (meta.gameNumber||1) + 1;
+        meta.gameNumber = stepGameNumber(meta.gameNumber||1, 1, meta.date, gameIndex.currentGameId);
         saveMeta(); render();
       });
       const gameNumDownBtn = document.getElementById("bbSetupGameNumDown");
       if(gameNumDownBtn) gameNumDownBtn.addEventListener("click", ()=>{
-        meta.gameNumber = Math.max(1, (meta.gameNumber||1) - 1);
+        meta.gameNumber = stepGameNumber(meta.gameNumber||1, -1, meta.date, gameIndex.currentGameId);
         saveMeta(); render();
       });
       const addBtn = document.getElementById("bbAddPlayer");
@@ -1913,21 +1941,22 @@ if (!window.storage) {
       if(modal.type === "newGame"){
         const dateInput = document.getElementById("bbNewGameDate");
         if(dateInput) dateInput.addEventListener("change", ()=>{
-          modal = {type:"newGame", date: dateInput.value};
+          const newDate = dateInput.value;
+          modal = {type:"newGame", date: newDate, gameNumber: suggestedGameNumber(newDate)};
           render();
         });
         const downBtn = document.getElementById("bbGameNumDown");
         if(downBtn) downBtn.addEventListener("click", ()=>{
           const date = modal.date || todayLocal();
           const current = modal.gameNumber || suggestedGameNumber(date);
-          modal = {type:"newGame", date, gameNumber: Math.max(1, current-1)};
+          modal = {type:"newGame", date, gameNumber: stepGameNumber(current, -1, date, null)};
           render();
         });
         const upBtn = document.getElementById("bbGameNumUp");
         if(upBtn) upBtn.addEventListener("click", ()=>{
           const date = modal.date || todayLocal();
           const current = modal.gameNumber || suggestedGameNumber(date);
-          modal = {type:"newGame", date, gameNumber: current+1};
+          modal = {type:"newGame", date, gameNumber: stepGameNumber(current, 1, date, null)};
           render();
         });
         const createBtn = document.getElementById("bbCreateGame");
