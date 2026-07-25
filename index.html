@@ -1099,7 +1099,7 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
-      <div class="bb-section-title">試合登録・切り替え</div>
+      <div class="bb-section-title">試合登録・切り替え（${gameIndex.games.length}件登録済み）</div>
       <div class="bb-card">
         <div class="bb-row" style="margin-bottom:10px; align-items:stretch;">
           <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}" style="flex:1.4; min-width:0;"/>
