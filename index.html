@@ -1271,9 +1271,11 @@ if (!window.storage) {
             </span>
           </div>
           <div class="bb-edit-row-controls">
-            <select class="bb-edit-select" data-log-player="${e.id}">${[...meta.roster, ownGoalPlayer()].map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>
+            ${e.playerId === OWNGOAL_ID
+              ? `<div class="bb-edit-select" style="display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">🥅 オウンゴール</div>`
+              : `<select class="bb-edit-select" data-log-player="${e.id}">${meta.roster.map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>`}
             <select class="bb-edit-select" data-log-type="${e.id}">${Object.keys(STAT_TYPES).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
-            <select class="bb-edit-select" data-log-quarter="${e.id}" style="flex:0 0 62px;">${[1,2,3,4].map(q=>`<option value="${q}" ${q===e.quarter?"selected":""}>${q}Q</option>`).join("")}</select>
+            <div class="bb-edit-select" style="flex:0 0 52px; display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">${e.quarter}Q</div>
           </div>
           ${e.type==="ft" ? `
           <div class="bb-edit-row-controls" style="margin-top:6px;">
@@ -1965,9 +1967,6 @@ if (!window.storage) {
         });
         document.querySelectorAll("[data-log-type]").forEach(el=>{
           el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-type"), {type: el.value}));
-        });
-        document.querySelectorAll("[data-log-quarter]").forEach(el=>{
-          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-quarter"), {quarter: Number(el.value)}));
         });
         document.querySelectorAll("[data-log-ft-awarded]").forEach(el=>{
           el.addEventListener("change", ()=>{
