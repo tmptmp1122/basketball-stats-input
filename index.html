@@ -1173,7 +1173,6 @@ if (!window.storage) {
         </div>`;
     }).join("");
 
-    const logCount = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").length;
     const flaggedCount = evState.events.filter(e=>e.flagged).length;
     const ogStats = computeStats(OWNGOAL_ID);
     const ogSel = selectedPlayer===OWNGOAL_ID ? "selected" : "";
@@ -1182,7 +1181,7 @@ if (!window.storage) {
       <div class="bb-qtr-row" style="margin-top:0; margin-bottom:8px;">
         ${[1,2,3,4].map(q => `<button class="bb-qtr-btn ${meta.quarter===q?'active':''}" data-q="${q}">${q}Q</button>`).join("")}
         <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenOpp">相手得点${oppTotalScore() ? `<span class="bb-qtr-badge">${oppTotalScore()}</span>` : ""}</button>
-        <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenLog">記録修正${logCount ? `<span class="bb-qtr-badge ${flaggedCount?'flag':''}">${flaggedCount || logCount}</span>` : ""}</button>
+        <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenLog">記録修正${flaggedCount ? `<span class="bb-qtr-badge flag">${flaggedCount}</span>` : ""}</button>
       </div>
       <div class="bb-court-grid">${courtTiles}</div>
       <div class="bb-tile ${ogSel}" data-select="${OWNGOAL_ID}" style="margin-top:6px; min-height:auto; padding:6px 10px; display:flex; flex-direction:row; align-items:center; justify-content:space-between;">
@@ -1524,6 +1523,54 @@ if (!window.storage) {
           </div>
         </div>`;
     }
+    if(modal.type === "confirmEditLog"){
+      const e = evState.events.find(ev=>ev.id===modal.id);
+      if(!e) return "";
+      const p = playerName(e.playerId);
+      const context = `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}`;
+      let fromLabel, toLabel, heading;
+      if(modal.field === "playerId"){
+        const newP = playerName(modal.value);
+        heading = "選手を変更しますか？";
+        fromLabel = `#${esc(p.number)} ${esc(p.name)}`;
+        toLabel = `#${esc(newP.number)} ${esc(newP.name)}`;
+      }else{
+        heading = "種類を変更しますか？";
+        fromLabel = esc(STAT_TYPES[e.type] ? STAT_TYPES[e.type].label : e.type);
+        toLabel = esc(STAT_TYPES[modal.value] ? STAT_TYPES[modal.value].label : modal.value);
+      }
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>${heading}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              ${context}<br/><br/>
+              <b>${fromLabel}</b> → <b style="color:var(--gold);">${toLabel}</b> に変更します。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelEditLog" style="flex:1;">キャンセル</button>
+              <button class="bb-btn" id="bbConfirmEditLog" style="flex:1;">変更する</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    if(modal.type === "confirmUndo"){
+      const real = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot");
+      const last = real[real.length-1];
+      const p = last ? playerName(last.playerId) : null;
+      const label = last ? `${last.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(last))}` : "直前の記録";
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>直前の記録を戻しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この記録が取り消されます。</div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelUndo" style="flex:1;">キャンセル</button>
+              <button class="bb-btn danger" id="bbConfirmUndo" style="flex:1;" ${last?"":"disabled"}>戻す</button>
+            </div>
+          </div>
+        </div>`;
+    }
     return "";
   }
 
@@ -1729,7 +1776,7 @@ if (!window.storage) {
       const openLog = document.getElementById("bbOpenLog");
       if(openLog) openLog.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
       const undoBtn = document.getElementById("bbUndoBtn");
-      if(undoBtn) undoBtn.addEventListener("click", undoLast);
+      if(undoBtn) undoBtn.addEventListener("click", ()=>{ modal = {type:"confirmUndo"}; render(); });
       document.querySelectorAll("[data-stat]").forEach(el=>{
         el.addEventListener("click", ()=>{
           if(!selectedPlayer) return;
@@ -1963,10 +2010,16 @@ if (!window.storage) {
           render();
         });
         document.querySelectorAll("[data-log-player]").forEach(el=>{
-          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-player"), {playerId: el.value}));
+          el.addEventListener("change", ()=>{
+            modal = {type:"confirmEditLog", id: el.getAttribute("data-log-player"), field:"playerId", value: el.value};
+            render();
+          });
         });
         document.querySelectorAll("[data-log-type]").forEach(el=>{
-          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-type"), {type: el.value}));
+          el.addEventListener("change", ()=>{
+            modal = {type:"confirmEditLog", id: el.getAttribute("data-log-type"), field:"type", value: el.value};
+            render();
+          });
         });
         document.querySelectorAll("[data-log-ft-awarded]").forEach(el=>{
           el.addEventListener("change", ()=>{
@@ -1989,6 +2042,25 @@ if (!window.storage) {
           const id = modal.id;
           modal = {type:"log"};
           removeEvent(id);
+        });
+      }
+      if(modal.type === "confirmEditLog"){
+        const cancelBtn = document.getElementById("bbCancelEditLog");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
+        const confirmBtn = document.getElementById("bbConfirmEditLog");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          const id = modal.id, field = modal.field, value = modal.value;
+          modal = {type:"log"};
+          editEvent(id, {[field]: value});
+        });
+      }
+      if(modal.type === "confirmUndo"){
+        const cancelBtn = document.getElementById("bbCancelUndo");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmUndo");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          modal = null;
+          undoLast();
         });
       }
     }
