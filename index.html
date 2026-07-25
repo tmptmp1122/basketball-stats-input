@@ -84,12 +84,19 @@
   .bb-score{font-size:28px; line-height:1;}
   .bb-score.us{color:var(--gold);}
   .bb-vs{font-size:10px; color:var(--chalk-dim); padding:0 8px;}
-  .bb-qtr-row{display:flex; gap:6px; margin-top:6px;}
+  .bb-qtr-row{display:flex; gap:4px; margin-top:6px;}
   .bb-qtr-btn{
     flex:1; padding:6px 0; border-radius:10px; border:1px solid var(--line);
     background:var(--panel); color:var(--chalk-dim); font-size:13px; font-weight:700; cursor:pointer;
+    position:relative;
   }
   .bb-qtr-btn.active{background:var(--maple); color:#1b1105; border-color:var(--maple);}
+  .bb-qtr-btn-toolbar{ font-size:10px; flex:1.5; padding:6px 2px; white-space:nowrap; }
+  .bb-qtr-badge{
+    display:inline-block; margin-left:3px; background:var(--gold); color:#2a1d05;
+    border-radius:8px; padding:0 5px; font-size:10px; font-weight:800;
+  }
+  .bb-qtr-badge.flag{ background:var(--whistle); color:#fff; }
 
   .bb-tabs{
     display:flex; background:var(--panel); border-bottom:1px solid var(--line);
@@ -171,13 +178,6 @@
   }
   .bb-bench-chip:active{background:var(--panel2);}
 
-  .bb-game-toolbar{display:flex; gap:8px; margin-bottom:8px;}
-  .bb-chip-btn{
-    flex:1; background:var(--panel); border:1px solid var(--line); color:var(--chalk-dim);
-    border-radius:10px; padding:7px 8px; font-size:12px; font-weight:700; cursor:pointer;
-  }
-  .bb-chip-btn:active{background:var(--panel2);}
-
   /* modal */
   .bb-modal-overlay{
     position:fixed; inset:0; background:rgba(8,14,18,0.6); z-index:40;
@@ -214,7 +214,7 @@
     border-radius:8px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap;
   }
   .bb-undo-btn[disabled]{opacity:0.35; cursor:default;}
-  .bb-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:5px;}
+  .bb-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:5px;}
   .bb-stat-btn{
     padding:10px 0; border-radius:9px; border:none; font-weight:800; font-size:13px; cursor:pointer; color:#fff;
   }
@@ -274,11 +274,6 @@
 </div>
 
 <script>
-// --- Standalone shim: this file is meant to be hosted outside Claude (e.g. GitHub
-// Pages, Netlify). window.storage only exists inside Claude's artifact sandbox, so
-// this polyfills the same interface using the browser's normal localStorage.
-// Note: unlike Claude's storage, this data stays on THIS device/browser only —
-// it does not sync across devices or accounts.
 if (!window.storage) {
   window.storage = {
     async get(key, shared) {
@@ -1024,11 +1019,11 @@ if (!window.storage) {
         <div class="bb-header-top">
           <div class="bb-title bb-display"><img src="${LOGO_DATA_URI}" alt="logo" style="height:22px; width:22px; vertical-align:middle; border-radius:50%; margin-right:5px; object-fit:cover;"/>スタッツ入力支援ツール</div>
           <div style="display:flex; align-items:center; gap:8px;">
+            <div style="font-size:10px; color:var(--chalk-dim); white-space:nowrap;">${esc(meta.date)} 第${esc(meta.gameNumber)}試合</div>
             <a href="https://docs.google.com/document/d/1JsNI6sJe2ScpBxmB4dzCbfgPricvJJncyzSE4BT8K-I/edit?tab=t.0#heading=h.8p5rw0gcurfh" target="_blank" rel="noopener" title="マニュアル" style="text-decoration:none; opacity:0.55; font-size:13px;">📖</a>
             <a href="https://www.youtube.com/watch?v=HAFrml2R5yI" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
           </div>
         </div>
-        <div style="font-size:11px; color:var(--chalk-dim); text-align:right; margin-top:4px;">${esc(meta.date)} 第${esc(meta.gameNumber)}試合 vs ${esc(meta.opponentName)}</div>
         <div class="bb-scorebug">
           <div class="bb-team-block">
             <div class="bb-team-name">${esc(meta.teamName)}</div>
@@ -1171,10 +1166,8 @@ if (!window.storage) {
     return `
       <div class="bb-qtr-row" style="margin-top:0; margin-bottom:8px;">
         ${[1,2,3,4].map(q => `<button class="bb-qtr-btn ${meta.quarter===q?'active':''}" data-q="${q}">${q}Q</button>`).join("")}
-      </div>
-      <div class="bb-game-toolbar">
-        <button class="bb-chip-btn" id="bbOpenOpp">相手チーム 得点 (計${oppTotalScore()})</button>
-        <button class="bb-chip-btn" id="bbOpenLog">記録一覧・訂正（${logCount}件${flaggedCount ? ` ・🚩${flaggedCount}` : ""}）</button>
+        <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenOpp">相手得点${oppTotalScore() ? `<span class="bb-qtr-badge">${oppTotalScore()}</span>` : ""}</button>
+        <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenLog">記録修正${logCount ? `<span class="bb-qtr-badge ${flaggedCount?'flag':''}">${flaggedCount || logCount}</span>` : ""}</button>
       </div>
       <div class="bb-court-grid">${courtTiles}</div>
       <div class="bb-tile ${ogSel}" data-select="${OWNGOAL_ID}" style="margin-top:6px; min-height:auto; padding:6px 10px; display:flex; flex-direction:row; align-items:center; justify-content:space-between;">
@@ -1536,9 +1529,9 @@ if (!window.storage) {
       return `
       <div class="bb-actionbar">
         ${whoLine}
-        <div class="bb-grid">
-          <button class="bb-stat-btn make" data-og-score="2" style="grid-column: span 2;">2点</button>
-          <button class="bb-stat-btn make" data-og-score="3" style="grid-column: span 2;">3点</button>
+        <div class="bb-grid" style="grid-template-columns:repeat(2,1fr);">
+          <button class="bb-stat-btn make" data-og-score="2">2点</button>
+          <button class="bb-stat-btn make" data-og-score="3">3点</button>
         </div>
       </div>`;
     }
