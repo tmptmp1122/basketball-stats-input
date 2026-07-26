@@ -474,7 +474,7 @@ if (!window.storage) {
   function newGameId(){ return "g" + Date.now() + Math.random().toString(36).slice(2,7); }
 
   function gameLabel(g){
-    return `${g.date || ""} 第${g.gameNumber||1}試合${g.opponentName ? " vs "+g.opponentName : ""}`;
+    return `${g.date || ""} ${g.gameNumber||1}試合目${g.opponentName ? " vs "+g.opponentName : ""}`;
   }
 
   async function saveIndex(){
@@ -1137,7 +1137,7 @@ if (!window.storage) {
         <div class="bb-header-top">
           <div class="bb-title bb-display"><img src="${LOGO_DATA_URI}" alt="logo" style="height:22px; width:22px; vertical-align:middle; border-radius:50%; margin-right:5px; object-fit:cover;"/>スタッツ入力支援ツール</div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <div style="font-size:10px; color:var(--chalk-dim); white-space:nowrap;">${esc(meta.date)} 第${esc(meta.gameNumber)}試合</div>
+            <div style="font-size:10px; color:var(--chalk-dim); white-space:nowrap;">${esc(meta.date)} ${esc(meta.gameNumber)}試合目</div>
             <a href="https://docs.google.com/document/d/1JsNI6sJe2ScpBxmB4dzCbfgPricvJJncyzSE4BT8K-I/edit?tab=t.0#heading=h.8p5rw0gcurfh" target="_blank" rel="noopener" title="マニュアル" style="text-decoration:none; opacity:0.55; font-size:13px;">📖</a>
             <a href="https://youtu.be/5gukjUI8nUU" target="_blank" rel="noopener" title="使い方動画" style="text-decoration:none; opacity:0.55; font-size:13px;">🎥</a>
           </div>
@@ -1174,27 +1174,21 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
-      <div class="bb-section-title">現在の試合</div>
+      <div class="bb-row" style="align-items:center; justify-content:space-between; margin:0 0 8px;">
+        <div class="bb-section-title" style="margin:0;">現在編集中の試合（${gameIndex.games.length}件登録済み）</div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="bb-btn secondary" id="bbOpenGameSwitch" style="font-size:11px; padding:5px 9px; white-space:nowrap;">試合切替</button>
+          <button class="bb-btn" id="bbNewGame" style="font-size:11px; padding:5px 9px; white-space:nowrap;">＋新しい試合</button>
+        </div>
+      </div>
       <div class="bb-card">
-        <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:8px;">今表示している試合の日付・試合番号を編集します（新しい試合の作成ではありません）</div>
-        <div class="bb-row" style="align-items:stretch;">
+        <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:8px;">今表示している試合の日付・チーム名を編集します（新規作成は右上の「＋新しい試合」から）</div>
+        <div class="bb-row" style="align-items:stretch; margin-bottom:10px;">
           <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}" style="flex:1.4; min-width:0;"/>
-          <div class="bb-inline-gamenum">第${meta.gameNumber}試合</div>
+          <div class="bb-inline-gamenum">${meta.gameNumber}試合目</div>
           <button class="bb-stepper-btn" id="bbSetupGameNumUp">＋</button>
           <button class="bb-stepper-btn" id="bbSetupGameNumDown" ${meta.gameNumber<=1?"disabled":""}>－</button>
         </div>
-      </div>
-
-      <div class="bb-section-title">試合登録・切り替え（${gameIndex.games.length}件登録済み）</div>
-      <div class="bb-card">
-        <div class="bb-row" style="gap:8px;">
-          <button class="bb-btn secondary" id="bbOpenGameSwitch" style="flex:1;">他の試合に切り替える</button>
-          <button class="bb-btn" id="bbNewGame" style="flex:1;">＋ 新しい試合</button>
-        </div>
-      </div>
-
-      <div class="bb-section-title">チーム情報</div>
-      <div class="bb-card">
         <div class="bb-row">
           <div style="flex:1; min-width:0;">
             <span class="bb-label">自チーム名</span>
@@ -1573,7 +1567,7 @@ if (!window.storage) {
             <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
             <div class="bb-row" style="margin-bottom:14px; align-items:stretch;">
               <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}" style="flex:1.4; min-width:0;"/>
-              <div class="bb-inline-gamenum">第${gameNumber}試合</div>
+              <div class="bb-inline-gamenum">${gameNumber}試合目</div>
               <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
               <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
             </div>
