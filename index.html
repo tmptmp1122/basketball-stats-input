@@ -172,6 +172,16 @@
     display:flex; flex-direction:column; justify-content:center;
   }
   .bb-tile.selected{border-color:var(--gold); background:var(--panel2); box-shadow:0 0 0 1px var(--gold);}
+  .bb-tile.picked{border-color:var(--net); background:var(--net-dim); box-shadow:0 0 0 1px var(--net);}
+  .bb-reorder-toggle{
+    color:var(--chalk-dim); font-size:12px; font-weight:700; white-space:pre-line; line-height:1.3;
+    display:flex; align-items:center; justify-content:center; font-family:inherit;
+  }
+  .bb-reorder-toggle.active{ border-color:var(--whistle); background:var(--whistle-dim); color:var(--whistle); }
+  .bb-reorder-banner{
+    background:var(--net-dim); border:1px solid var(--net); border-radius:10px;
+    padding:8px 10px; font-size:12px; color:var(--chalk); margin-bottom:8px;
+  }
   .bb-tile.empty{border-style:dashed; color:var(--chalk-dim); cursor:default; font-size:12px;}
   .bb-tile-num{font-size:10px; color:var(--maple-bright); font-weight:800;}
   .bb-tile-name{font-size:14px; margin:1px 0; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
@@ -349,6 +359,8 @@ if (!window.storage) {
   let tab = "setup";         // setup | game | stats
   let modal = null;          // {type:'sub', slot} | {type:'opponent'} | {type:'log'} | null
   let selectedPlayer = null; // player id selected for stat entry
+  let reorderMode = false;   // true while rearranging the on-screen tile positions
+  let reorderPick = null;    // first tile position picked while reordering (awaiting a second)
 
   let gameIndex = { currentGameId: null, games: [] }; // games: [{id,date,gameNumber,teamName,opponentName,updatedAt}]
   let meta = null;    // {teamName,opponentName,date,gameNumber,venue,sheetUrl,roster:[],onCourt:[5],quarter,opponent:{1:0,2:0,3:0,4:0},updatedAt}
@@ -399,6 +411,7 @@ if (!window.storage) {
       sheetUrl: d.sheetUrl,
       roster: makeDefaultRoster(),
       onCourtByQuarter: { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] },
+      displayOrderByQuarter: { 1:[0,1,2,3,4], 2:[0,1,2,3,4], 3:[0,1,2,3,4], 4:[0,1,2,3,4] },
       quarter: 1,
       opponent: {1:0,2:0,3:0,4:0},
       updatedAt: Date.now()
@@ -418,6 +431,26 @@ if (!window.storage) {
     meta.onCourtByQuarter = { 1:[null,null,null,null,null], 2:[null,null,null,null,null], 3:[null,null,null,null,null], 4:[null,null,null,null,null] };
     meta.onCourtByQuarter[meta.quarter] = legacy;
     delete meta.onCourt;
+  }
+
+  // Purely cosmetic per-quarter ordering of the 5 court tiles on screen — does
+  // NOT affect which player occupies which functional slot (onCourtByQuarter),
+  // substitutions, or playing-time math. Lets a coach put frequently-recorded
+  // players in easy-to-reach positions without touching any real game data.
+  function currentDisplayOrder(){
+    if(!meta.displayOrderByQuarter) migrateDisplayOrder();
+    if(!meta.displayOrderByQuarter[meta.quarter]) meta.displayOrderByQuarter[meta.quarter] = [0,1,2,3,4];
+    return meta.displayOrderByQuarter[meta.quarter];
+  }
+  function migrateDisplayOrder(){
+    meta.displayOrderByQuarter = { 1:[0,1,2,3,4], 2:[0,1,2,3,4], 3:[0,1,2,3,4], 4:[0,1,2,3,4] };
+  }
+  function swapDisplayPositions(posA, posB){
+    const order = currentDisplayOrder();
+    const tmp = order[posA];
+    order[posA] = order[posB];
+    order[posB] = tmp;
+    saveMeta();
   }
 
   // Personal (non-shared) storage — scoped to this person only, no room code needed.
@@ -728,11 +761,20 @@ if (!window.storage) {
     evState.events.push({id:newEventId(), type:"courtslot", slot, playerId, quarter, ts:Date.now()});
   }
 
+  // Best-effort haptic feedback on record entry. Not supported on iOS Safari
+  // (no vibration API there) — silently does nothing in that case.
+  function vibrate(ms){
+    if("vibrate" in navigator){
+      try{ navigator.vibrate(ms); }catch(e){ /* ignore */ }
+    }
+  }
+
   function addEvent(playerId, type){
     const q = meta.quarter;
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type, ts:Date.now()});
     saveEvents();
+    vibrate(30);
     render();
   }
 
@@ -741,6 +783,7 @@ if (!window.storage) {
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type:"ft", awarded, made, ts:Date.now()});
     saveEvents();
+    vibrate(30);
     render();
   }
 
@@ -760,6 +803,7 @@ if (!window.storage) {
     if(real.length===0) return;
     const last = real[real.length-1];
     removeEvent(last.id);
+    vibrate([25,40,25]);
     const p = playerName(last.playerId);
     toast(`取り消し: #${p.number} ${p.name} ${eventLabel(last)}`);
   }
@@ -924,6 +968,8 @@ if (!window.storage) {
     meta.quarter = q;
     if(!meta.onCourtByQuarter) migrateOnCourt();
     selectedPlayer = null;
+    reorderMode = false;
+    reorderPick = null;
     saveMeta(); render();
   }
   function addOpponentPts(q, pts){
@@ -1185,26 +1231,47 @@ if (!window.storage) {
       return `<div class="bb-empty">まず「設定」タブで選手を登録してください</div>`;
     }
     const onCourt = currentOnCourt();
-    const courtTiles = onCourt.map((pid, idx) => {
+    const order = currentDisplayOrder();
+    const courtTiles = order.map((slotIdx, posIdx) => {
+      const pid = onCourt[slotIdx];
       if(!pid){
-        return `<div class="bb-tile empty" data-slot="${idx}" data-empty="1">＋ 選手を選択</div>`;
+        if(reorderMode){
+          const picked = reorderPick === posIdx ? "picked" : "";
+          return `<div class="bb-tile empty ${picked}" data-reorder-pos="${posIdx}">(空き枠)</div>`;
+        }
+        return `<div class="bb-tile empty" data-slot="${slotIdx}" data-empty="1">＋ 選手を選択</div>`;
       }
       const p = playerName(pid);
       const s = computeStats(pid);
+      if(reorderMode){
+        const picked = reorderPick === posIdx ? "picked" : "";
+        return `
+          <div class="bb-tile ${picked}" data-reorder-pos="${posIdx}">
+            <div class="bb-tile-num">#${esc(p.number)}</div>
+            <div class="bb-tile-name">${esc(p.name)}</div>
+            <div class="bb-tile-pts">${s.pts}点 / F${s.pfByQ.length}</div>
+          </div>`;
+      }
       const sel = selectedPlayer===pid ? "selected" : "";
       return `
         <div class="bb-tile ${sel}" data-select="${pid}">
-          <button class="bb-tile-sub" data-sub-slot="${idx}">交代</button>
-          <button class="bb-tile-remove" data-remove-slot="${idx}">削除</button>
+          <button class="bb-tile-sub" data-sub-slot="${slotIdx}">交代</button>
+          <button class="bb-tile-remove" data-remove-slot="${slotIdx}">削除</button>
           <div class="bb-tile-num">#${esc(p.number)}</div>
           <div class="bb-tile-name">${esc(p.name)}</div>
           <div class="bb-tile-pts">${s.pts}点 / F${s.pfByQ.length}</div>
         </div>`;
     }).join("");
+    const reorderToggleTile = `<button class="bb-tile bb-reorder-toggle ${reorderMode?'active':''}" id="bbReorderToggle">${reorderMode ? "並び替え\n終了" : "並び替え"}</button>`;
 
     const flaggedCount = evState.events.filter(e=>e.flagged).length;
     const ogStats = computeStats(OWNGOAL_ID);
     const ogSel = selectedPlayer===OWNGOAL_ID ? "selected" : "";
+
+    const reorderBanner = reorderMode ? `
+      <div class="bb-reorder-banner">
+        ${reorderPick===null ? "並び替え中:入れ替えたい選手を2人タップしてください" : "もう1人タップしてください（同じ選手をもう一度タップで選択解除）"}
+      </div>` : "";
 
     return `
       <div class="bb-qtr-row" style="margin-top:0; margin-bottom:8px;">
@@ -1212,7 +1279,8 @@ if (!window.storage) {
         <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenOpp">相手得点${oppTotalScore() ? `<span class="bb-qtr-badge">${oppTotalScore()}</span>` : ""}</button>
         <button class="bb-qtr-btn bb-qtr-btn-toolbar" id="bbOpenLog">記録修正${flaggedCount ? `<span class="bb-qtr-badge flag">${flaggedCount}</span>` : ""}</button>
       </div>
-      <div class="bb-court-grid">${courtTiles}</div>
+      ${reorderBanner}
+      <div class="bb-court-grid">${courtTiles}${reorderToggleTile}</div>
       <div class="bb-tile ${ogSel}" data-select="${OWNGOAL_ID}" style="margin-top:6px; min-height:auto; padding:6px 10px; display:flex; flex-direction:row; align-items:center; justify-content:space-between;">
         <div class="bb-tile-name" style="white-space:normal; font-size:12px; font-weight:400; color:var(--chalk-dim); margin:0;">🥅 オウンゴール(相手の自滅でこちらの得点となった場合)</div>
         <div class="bb-tile-pts" style="margin:0;">${ogStats.pts}点</div>
@@ -1592,6 +1660,31 @@ if (!window.storage) {
           </div>
         </div>`;
     }
+    if(modal.type === "confirmReorderPositions"){
+      const order = currentDisplayOrder();
+      const onCourt = currentOnCourt();
+      const nameAt = (pos) => {
+        const slotIdx = order[pos];
+        const pid = onCourt[slotIdx];
+        if(!pid) return "空き枠";
+        const p = playerName(pid);
+        return `#${esc(p.number)} ${esc(p.name)}`;
+      };
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>表示位置を入れ替えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+              <b>${nameAt(modal.posA)}</b> と <b>${nameAt(modal.posB)}</b> の表示位置を入れ替えます。<br/>
+              このクオーターの見た目だけが変わります(出場データには影響しません)。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelReorderPositions" style="flex:1;">キャンセル</button>
+              <button class="bb-btn" id="bbConfirmReorderPositions" style="flex:1;">入れ替える</button>
+            </div>
+          </div>
+        </div>`;
+    }
     return "";
   }
 
@@ -1776,6 +1869,27 @@ if (!window.storage) {
     }
 
     if(tab==="game"){
+      const reorderToggle = document.getElementById("bbReorderToggle");
+      if(reorderToggle) reorderToggle.addEventListener("click", ()=>{
+        reorderMode = !reorderMode;
+        reorderPick = null;
+        render();
+      });
+      document.querySelectorAll("[data-reorder-pos]").forEach(el=>{
+        el.addEventListener("click", ()=>{
+          const pos = Number(el.getAttribute("data-reorder-pos"));
+          if(reorderPick === null){
+            reorderPick = pos;
+            render();
+          }else if(reorderPick === pos){
+            reorderPick = null; // tapped the same tile again — deselect
+            render();
+          }else{
+            modal = {type:"confirmReorderPositions", posA: reorderPick, posB: pos};
+            render();
+          }
+        });
+      });
       document.querySelectorAll(".bb-live-log-panel [data-toggle-flag]").forEach(el=>{
         el.addEventListener("click", (e)=>{
           e.stopPropagation();
@@ -1784,6 +1898,7 @@ if (!window.storage) {
       });
       document.querySelectorAll("[data-select]").forEach(el=>{
         el.addEventListener("click", (e)=>{
+          if(reorderMode) return;
           if(e.target.closest("[data-sub-slot]") || e.target.closest("[data-remove-slot]")) return;
           selectedPlayer = el.getAttribute("data-select");
           render();
@@ -2100,6 +2215,17 @@ if (!window.storage) {
         if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
           modal = null;
           undoLast();
+        });
+      }
+      if(modal.type === "confirmReorderPositions"){
+        const cancelBtn = document.getElementById("bbCancelReorderPositions");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; reorderPick=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmReorderPositions");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          swapDisplayPositions(modal.posA, modal.posB);
+          modal = null;
+          reorderPick = null;
+          render();
         });
       }
     }
