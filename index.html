@@ -1174,14 +1174,19 @@ if (!window.storage) {
 
   function renderSetup(){
     return `
-      <div class="bb-section-title">試合登録・切り替え（${gameIndex.games.length}件登録済み）</div>
+      <div class="bb-section-title">現在の試合</div>
       <div class="bb-card">
-        <div class="bb-row" style="margin-bottom:10px; align-items:stretch;">
+        <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:8px;">今表示している試合の日付・試合番号を編集します（新しい試合の作成ではありません）</div>
+        <div class="bb-row" style="align-items:stretch;">
           <input class="bb-input" id="bbDate" type="date" value="${esc(meta.date)}" style="flex:1.4; min-width:0;"/>
           <div class="bb-inline-gamenum">第${meta.gameNumber}試合</div>
           <button class="bb-stepper-btn" id="bbSetupGameNumUp">＋</button>
           <button class="bb-stepper-btn" id="bbSetupGameNumDown" ${meta.gameNumber<=1?"disabled":""}>－</button>
         </div>
+      </div>
+
+      <div class="bb-section-title">試合登録・切り替え（${gameIndex.games.length}件登録済み）</div>
+      <div class="bb-card">
         <div class="bb-row" style="gap:8px;">
           <button class="bb-btn secondary" id="bbOpenGameSwitch" style="flex:1;">他の試合に切り替える</button>
           <button class="bb-btn" id="bbNewGame" style="flex:1;">＋ 新しい試合</button>
