@@ -81,7 +81,13 @@
   }
   .bb-team-block{flex:1; text-align:center;}
   .bb-team-name{font-size:11px; color:var(--chalk-dim); margin-bottom:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-  .bb-score{font-size:28px; line-height:1;}
+  .bb-score{font-size:28px; line-height:1; display:inline-block;}
+  @keyframes bb-score-pulse{
+    0%{ transform:scale(1); }
+    35%{ transform:scale(1.4); text-shadow:0 0 14px currentColor; }
+    100%{ transform:scale(1); text-shadow:none; }
+  }
+  .bb-score.score-pulse{ animation:bb-score-pulse 0.45s ease-out; }
   .bb-score.us{color:var(--gold);}
   .bb-vs{font-size:10px; color:var(--chalk-dim); padding:0 8px;}
   .bb-qtr-row{display:flex; gap:4px; margin-top:6px;}
@@ -361,6 +367,8 @@ if (!window.storage) {
   let selectedPlayer = null; // player id selected for stat entry
   let reorderMode = false;   // true while rearranging the on-screen tile positions
   let reorderPick = null;    // first tile position picked while reordering (awaiting a second)
+  let prevUsScore = null;    // last-rendered score, used to trigger a brief pulse animation on change
+  let prevOppScore = null;
 
   let gameIndex = { currentGameId: null, games: [] }; // games: [{id,date,gameNumber,teamName,opponentName,updatedAt}]
   let meta = null;    // {teamName,opponentName,date,gameNumber,venue,sheetUrl,roster:[],onCourt:[5],quarter,opponent:{1:0,2:0,3:0,4:0},updatedAt}
@@ -770,19 +778,22 @@ if (!window.storage) {
   }
 
   // Guards against touchscreen "bounce"/double-fire registering one physical
-  // tap as two records. Genuine intentional taps are virtually always spaced
-  // further apart than this, even when tapping quickly.
+  // tap as two records. Only blocks the exact same player+type repeating
+  // within the window — e.g. tapping 2P then AST right after for the same
+  // play is a normal, intentional sequence and must still go through.
+  let lastRecordKey = null;
   let lastRecordTs = 0;
   const RECORD_DEBOUNCE_MS = 150;
-  function debounced(){
+  function debounced(key){
     const now = Date.now();
-    if(now - lastRecordTs < RECORD_DEBOUNCE_MS) return true;
+    if(key === lastRecordKey && now - lastRecordTs < RECORD_DEBOUNCE_MS) return true;
+    lastRecordKey = key;
     lastRecordTs = now;
     return false;
   }
 
   function addEvent(playerId, type){
-    if(debounced()) return;
+    if(debounced(playerId + ":" + type)) return;
     const q = meta.quarter;
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type, ts:Date.now()});
@@ -792,7 +803,7 @@ if (!window.storage) {
   }
 
   function addFreeThrowEvent(playerId, awarded, made){
-    if(debounced()) return;
+    if(debounced(playerId + ":ft")) return;
     const q = meta.quarter;
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type:"ft", awarded, made, ts:Date.now()});
@@ -1117,6 +1128,10 @@ if (!window.storage) {
 
   function renderHeader(){
     const us = ourTotalScore(), opp = oppTotalScore();
+    const usPulse = (prevUsScore !== null && us !== prevUsScore) ? "score-pulse" : "";
+    const oppPulse = (prevOppScore !== null && opp !== prevOppScore) ? "score-pulse" : "";
+    prevUsScore = us;
+    prevOppScore = opp;
     return `
       <div class="bb-header">
         <div class="bb-header-top">
@@ -1130,12 +1145,12 @@ if (!window.storage) {
         <div class="bb-scorebug">
           <div class="bb-team-block">
             <div class="bb-team-name">${esc(meta.teamName)}</div>
-            <div class="bb-score us bb-mono">${us}</div>
+            <div class="bb-score us bb-mono ${usPulse}">${us}</div>
           </div>
           <div class="bb-vs">VS</div>
           <div class="bb-team-block">
             <div class="bb-team-name">${esc(meta.opponentName)}</div>
-            <div class="bb-score bb-mono">${opp}</div>
+            <div class="bb-score bb-mono ${oppPulse}">${opp}</div>
           </div>
         </div>
         <div class="bb-team-toggle">
