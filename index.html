@@ -769,7 +769,20 @@ if (!window.storage) {
     }
   }
 
+  // Guards against touchscreen "bounce"/double-fire registering one physical
+  // tap as two records. Genuine intentional taps are virtually always spaced
+  // further apart than this, even when tapping quickly.
+  let lastRecordTs = 0;
+  const RECORD_DEBOUNCE_MS = 150;
+  function debounced(){
+    const now = Date.now();
+    if(now - lastRecordTs < RECORD_DEBOUNCE_MS) return true;
+    lastRecordTs = now;
+    return false;
+  }
+
   function addEvent(playerId, type){
+    if(debounced()) return;
     const q = meta.quarter;
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type, ts:Date.now()});
@@ -779,6 +792,7 @@ if (!window.storage) {
   }
 
   function addFreeThrowEvent(playerId, awarded, made){
+    if(debounced()) return;
     const q = meta.quarter;
     ensurePresence(playerId, q);
     evState.events.push({id:newEventId(), playerId, quarter:q, type:"ft", awarded, made, ts:Date.now()});
@@ -1262,7 +1276,7 @@ if (!window.storage) {
           <div class="bb-tile-pts">${s.pts}点 / F${s.pfByQ.length}</div>
         </div>`;
     }).join("");
-    const reorderToggleTile = `<button class="bb-tile bb-reorder-toggle ${reorderMode?'active':''}" id="bbReorderToggle">${reorderMode ? "並び替え\n終了" : "並び替え"}</button>`;
+    const reorderToggleTile = `<button class="bb-tile bb-reorder-toggle ${reorderMode?'active':''}" id="bbReorderToggle">${reorderMode ? "並び替え\n終了" : "並び替え\n(長押し)"}</button>`;
 
     const flaggedCount = evState.events.filter(e=>e.flagged).length;
     const ogStats = computeStats(OWNGOAL_ID);
@@ -1370,7 +1384,7 @@ if (!window.storage) {
             ${e.playerId === OWNGOAL_ID
               ? `<div class="bb-edit-select" style="display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">🥅 オウンゴール</div>`
               : `<select class="bb-edit-select" data-log-player="${e.id}">${meta.roster.map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>`}
-            <select class="bb-edit-select" data-log-type="${e.id}">${Object.keys(STAT_TYPES).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
+            <select class="bb-edit-select" data-log-type="${e.id}">${(e.playerId===OWNGOAL_ID ? ["2m","2x","3m","3x"] : Object.keys(STAT_TYPES)).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
             <div class="bb-edit-select" style="flex:0 0 52px; display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">${e.quarter}Q</div>
           </div>
           ${e.type==="ft" ? `
@@ -1698,7 +1712,7 @@ if (!window.storage) {
     }
     const p = selectedPlayer ? playerName(selectedPlayer) : null;
     const disabled = selectedPlayer ? "" : "disabled";
-    const hasEvents = evState.events.some(e=>e.type!=="presence");
+    const hasEvents = evState.events.some(e=>e.type!=="presence" && e.type!=="courtslot");
     const whoLine = `
         <div class="bb-actionbar-who">
           <span>${p ? `記録対象: <b>#${esc(p.number)} ${esc(p.name)}</b>` : "選手をタップして選択"}</span>
@@ -1870,11 +1884,36 @@ if (!window.storage) {
 
     if(tab==="game"){
       const reorderToggle = document.getElementById("bbReorderToggle");
-      if(reorderToggle) reorderToggle.addEventListener("click", ()=>{
-        reorderMode = !reorderMode;
-        reorderPick = null;
-        render();
-      });
+      if(reorderToggle){
+        if(reorderMode){
+          // Exiting is low-risk — a normal tap is fine.
+          reorderToggle.addEventListener("click", ()=>{
+            reorderMode = false;
+            reorderPick = null;
+            render();
+          });
+        }else{
+          // Entering is the risky direction (mis-tap during normal play could
+          // trigger it), so require a deliberate long-press instead of a tap.
+          let pressTimer = null;
+          const startPress = ()=>{
+            clearTimeout(pressTimer);
+            pressTimer = setTimeout(()=>{
+              pressTimer = null;
+              reorderMode = true;
+              reorderPick = null;
+              vibrate(25);
+              render();
+            }, 550);
+          };
+          const cancelPress = ()=>{ clearTimeout(pressTimer); pressTimer = null; };
+          reorderToggle.addEventListener("pointerdown", startPress);
+          reorderToggle.addEventListener("pointerup", cancelPress);
+          reorderToggle.addEventListener("pointerleave", cancelPress);
+          reorderToggle.addEventListener("pointercancel", cancelPress);
+          reorderToggle.addEventListener("click", (e)=>{ e.preventDefault(); });
+        }
+      }
       document.querySelectorAll("[data-reorder-pos]").forEach(el=>{
         el.addEventListener("click", ()=>{
           const pos = Number(el.getAttribute("data-reorder-pos"));
