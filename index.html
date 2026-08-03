@@ -649,8 +649,12 @@ if (!window.storage) {
   }
 
   async function createNewGameInner(date, gameNumber){
+    const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
+    const preservedSheetUrl = meta && meta.sheetUrl ? meta.sheetUrl : null;
     const id = newGameId();
     meta = freshMeta(date, gameNumber);
+    meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
+    if(preservedSheetUrl) meta.sheetUrl = preservedSheetUrl;
     evState = { events: [], updatedAt: 0 };
     gameIndex.currentGameId = id;
     syncIndexEntry();
