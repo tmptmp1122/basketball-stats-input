@@ -504,6 +504,7 @@ if (!window.storage) {
 
   async function loadCurrentTeamData(opts){
     const isInitial = !!(opts && opts.initial);
+    lastSentSheet = null;
     let idx = null;
     try{ const res = await window.storage.get(indexKey(), false); idx = res ? JSON.parse(res.value) : null; }catch(e){ idx = null; }
 
@@ -609,6 +610,7 @@ if (!window.storage) {
 
   async function switchToGameInner(id){
     if(id === gameIndex.currentGameId) return;
+    lastSentSheet = null;
     let m = null, ev = null;
     try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
@@ -658,6 +660,7 @@ if (!window.storage) {
   async function createNewGameInner(date, gameNumber){
     const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
     const preservedSheetUrl = meta && meta.sheetUrl ? meta.sheetUrl : null;
+    lastSentSheet = null;
     const id = newGameId();
     meta = freshMeta(date, gameNumber);
     meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
@@ -1119,12 +1122,29 @@ if (!window.storage) {
   }
 
   // ---------- direct write via Google Apps Script webapp ----------
-  const TARGET_SHEET_NAME = "SありBASE";
+  // Template sheet that gets duplicated once per game. The GAS side decides
+  // the actual destination sheet name/position; the app just supplies the
+  // data needed to compute it (date/gameNumber/opponentName).
+  const TEMPLATE_SHEET_NAME = "SありBASE";
   let gasSending = false;
+  let lastSentSheet = null; // {gid, name, url} — set after a successful write, for the manual "open" fallback
 
   function spreadsheetIdFrom(url){
     const m = String(url||"").match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     return m ? m[1] : "";
+  }
+
+  function spreadsheetEditUrl(spreadsheetId, gid){
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${gid}`;
+  }
+
+  // Preview only — mirrors the naming logic that actually runs on the GAS
+  // side, so the confirmation dialog can show the user what sheet name to expect.
+  function computeGameSheetName(){
+    const datePart = String(meta.date||"").replace(/-/g, ".");
+    const num = meta.gameNumber || 1;
+    const opp = meta.opponentName || "";
+    return `${datePart}_${num}vs${opp}`;
   }
 
   async function sendToSheet(){
@@ -1135,9 +1155,10 @@ if (!window.storage) {
     const { cg, kl } = buildSheetRanges();
     const payload = {
       spreadsheetId: ssId,
-      sheetName: TARGET_SHEET_NAME,
+      templateSheetName: TEMPLATE_SHEET_NAME,
       header: {
         date: meta.date || "",
+        gameNumber: meta.gameNumber || 1,
         opponentName: meta.opponentName || "",
         gameTitle: meta.gameTitle || "",
         venue: meta.venue || "",
@@ -1161,7 +1182,15 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok){
         const over = meta.roster.length > PLAYER_ROWS;
-        toast(over ? `シートに書き込みました（先頭${PLAYER_ROWS}人分のみ）` : "シートに書き込みました");
+        toast(over ? `「${out.sheetName}」に書き込みました（先頭${PLAYER_ROWS}人分のみ）` : `「${out.sheetName}」に書き込みました`);
+        if(out.gid !== undefined && out.gid !== null){
+          const url = spreadsheetEditUrl(ssId, out.gid);
+          lastSentSheet = { name: out.sheetName, url };
+          // ブラウザのポップアップブロックにより自動で開けないことがあるため、
+          // 成功した場合でも常にアプリ内に手動で開けるリンクを残しておく。
+          const popup = window.open(url, "_blank");
+          if(!popup){ toast("ポップアップがブロックされました。下のリンクから開いてください"); }
+        }
       }else{
         toast((out && out.error) ? `書き込み失敗: ${out.error}` : "書き込みに失敗しました（スクリプト側の設定を確認してください）");
       }
@@ -1669,16 +1698,17 @@ if (!window.storage) {
     }
     if(modal.type === "confirmSendSheet"){
       const over = meta.roster.length > PLAYER_ROWS;
+      const previewName = computeGameSheetName();
       return `
         <div class="bb-modal-overlay" id="bbModalOverlay">
           <div class="bb-modal">
-            <div class="bb-modal-head"><h3>スプレッドシートに一括入力しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-modal-head"><h3>この試合のシートを作成しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
             <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
-              「${esc(TARGET_SHEET_NAME)}」シートの試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の対象範囲（C10:G36 / K10:L36）が<b>まるごと上書き</b>されます。既にシート側に入力済みの内容があっても、その内容は失われます。この操作は取り消せません。${over ? `<br>選手が${PLAYER_ROWS}人を超えているため、先頭${PLAYER_ROWS}人分のみ反映されます。` : ""}
+              「${esc(TEMPLATE_SHEET_NAME)}」をコピーして、シート名「<b>${esc(previewName)}</b>」を作成し（同名のシートが既にある場合はそのシートを使います）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の対象範囲（C10:G36 / K10:L36）を書き込みます。同名シートに既に入力済みの内容があっても<b>まるごと上書き</b>されます。この操作は取り消せません。${over ? `<br>選手が${PLAYER_ROWS}人を超えているため、先頭${PLAYER_ROWS}人分のみ反映されます。` : ""}
             </div>
             <div class="bb-row" style="gap:8px;">
               <button class="bb-btn secondary" id="bbCancelSendSheet" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmSendSheet" style="flex:1;">一括入力する</button>
+              <button class="bb-btn danger" id="bbConfirmSendSheet" style="flex:1;">作成して一括入力する</button>
             </div>
           </div>
         </div>`;
@@ -1876,9 +1906,10 @@ if (!window.storage) {
 
       <div class="bb-section-title">スプレッドシートに一括入力</div>
       <div class="bb-card" style="padding:10px 12px;">
-        <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":`スプレッドシートの「${esc(TARGET_SHEET_NAME)}」シートに一括入力（長押し）`}</button>
+        <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":"この試合のシートを作成して一括入力（長押し）"}</button>
+        ${lastSentSheet ? `<a href="${esc(lastSentSheet.url)}" target="_blank" rel="noopener" id="bbOpenLastSent" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">「${esc(lastSentSheet.name)}」を開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。対象範囲は毎回まるごと上書きされるため、以前の内容が残ることはありません。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
