@@ -1182,13 +1182,7 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok){
         const over = meta.roster.length > PLAYER_ROWS;
-        const writeMsg = over ? `「${out.sheetName}」に書き込みました（先頭${PLAYER_ROWS}人分のみ）` : `「${out.sheetName}」に書き込みました`;
-        // 書き込みに続けてサーバー側で集計更新も自動実行される（設計上、
-        // 集計更新の失敗は書き込み自体の成功とは切り離して扱われる）。
-        const totalsMsg = out.totalsUpdated
-          ? `／集計も更新しました（${out.totalsCount}件）`
-          : `／集計の更新に失敗しました（${out.totalsError || "不明なエラー"}）。スタッツタブから手動で再試行してください`;
-        toast(writeMsg + totalsMsg);
+        toast(over ? `「${out.sheetName}」に書き込みました（先頭${PLAYER_ROWS}人分のみ）` : `「${out.sheetName}」に書き込みました`);
         if(out.gid !== undefined && out.gid !== null){
           const url = spreadsheetEditUrl(ssId, out.gid);
           lastSentSheet = { name: out.sheetName, url };
@@ -1197,6 +1191,10 @@ if (!window.storage) {
           const popup = window.open(url, "_blank");
           if(!popup){ toast("ポップアップがブロックされました。下のリンクから開いてください"); }
         }
+        // 書き込みが終わり、シートへのジャンプも済んだ後に、続けて
+        // バックグラウンドで集計（TOTALシート）も更新する。ジャンプを
+        // 待たせないよう、この呼び出し自体は await しない。
+        updateTotalsInBackground(ssId);
       }else{
         toast((out && out.error) ? `書き込み失敗: ${out.error}` : "書き込みに失敗しました（スクリプト側の設定を確認してください）");
       }
@@ -1208,12 +1206,68 @@ if (!window.storage) {
     }
   }
 
+  /**
+   * 「集計を更新」を裏側で（トースト以外は何も画面に出さず）実行する。
+   * 一括入力の書き込み完了後に、自動的な後追い処理として呼ばれる。
+   */
+  async function updateTotalsInBackground(ssId){
+    try{
+      const res = await fetch(GAS_WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ spreadsheetId: ssId, action: "updateTotals" }),
+        redirect: "follow"
+      });
+      const text = await res.text();
+      let out = null;
+      try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
+      if(out && out.ok){
+        toast(`集計も更新しました（${out.count}件）`);
+      }else{
+        toast(`集計の更新に失敗しました（${(out && out.error) || "不明なエラー"}）。スタッツタブから手動で再試行してください`);
+      }
+    }catch(e){
+      console.error(e);
+      toast("集計の更新に失敗しました（通信状態を確認してください）。スタッツタブから手動で再試行してください");
+    }
+  }
+
+  /**
+   * TOTALシートのgidだけを軽量に取得して、すぐ新しいタブで開く。
+   * ロックを取らない専用アクションなので、重い「集計を更新」処理の
+   * 順番待ちに巻き込まれず、押した直後にジャンプできる。
+   */
+  async function jumpToTotalsSheet(ssId){
+    try{
+      const res = await fetch(GAS_WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ spreadsheetId: ssId, action: "getTotalsGid" }),
+        redirect: "follow"
+      });
+      const text = await res.text();
+      let out = null;
+      try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
+      if(out && out.ok && out.gid !== undefined && out.gid !== null){
+        const url = spreadsheetEditUrl(ssId, out.gid);
+        const popup = window.open(url, "_blank");
+        if(!popup){ toast("ポップアップがブロックされました。設定タブのURLからTOTALシートを開いてください"); }
+      }
+    }catch(e){
+      console.error(e);
+    }
+  }
+
   let totalsUpdating = false;
 
   async function updateTotals(){
     if(totalsUpdating){ toast("更新中です。少しお待ちください"); return; }
     const ssId = spreadsheetIdFrom(meta.sheetUrl);
     if(!ssId){ toast("STATSシートのURLが未設定または不正です（設定タブ）"); return; }
+
+    // TOTALシートは既に存在するシートなので、重い集計処理の完了を待たず、
+    // 押した直後にすぐジャンプする（実際の更新は裏で進む）。
+    jumpToTotalsSheet(ssId);
 
     totalsUpdating = true; render();
     try{
@@ -1228,11 +1282,6 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok){
         toast(`集計を更新しました（${out.count}件）`);
-        if(out.gid !== undefined && out.gid !== null){
-          const url = spreadsheetEditUrl(ssId, out.gid);
-          const popup = window.open(url, "_blank");
-          if(!popup){ toast("ポップアップがブロックされました。設定タブのURLからTOTALシートを開いてください"); }
-        }
       }else{
         toast((out && out.error) ? `更新失敗: ${out.error}` : "更新に失敗しました（スクリプト側の設定を確認してください）");
       }
@@ -1966,7 +2015,7 @@ if (!window.storage) {
         <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":"この試合のシートを作成して一括入力（長押し）"}</button>
         ${lastSentSheet ? `<a href="${esc(lastSentSheet.url)}" target="_blank" rel="noopener" id="bbOpenLastSent" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">「${esc(lastSentSheet.name)}」を開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みに続けて、下の「TOTALシートの集計を更新」も自動的に実行されます。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。<b>対戦相手名・試合名称・試合会場が空欄の場合は実行できません</b>（設定タブで入力してください）。
+          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みが終わり次第すぐに新しいタブでそのシートを自動的に開こうとします（ポップアップブロックにより開けない場合は上のリンクから開けます）。続けて、TOTALシートの集計も裏側で自動的に更新されます（画面を切り替えなくても構いません）。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。<b>対戦相手名・試合名称・試合会場が空欄の場合は実行できません</b>（設定タブで入力してください）。
         </div>
       </div>
 
@@ -1974,7 +2023,7 @@ if (!window.storage) {
       <div class="bb-card" style="padding:10px 12px;">
         <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。全試合分を読み直して再計算するため、<b>更新には40〜60秒程度かかります</b>（「更新中…」の表示のまま、途中で画面を閉じずにお待ちください）。実行後は新しいタブでTOTALシートを自動的に開こうとしますが、ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行するとすぐに新しいタブでTOTALシートを開こうとします（ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください）。集計の再計算は裏側で続いており、<b style="color:var(--whistle);">全試合分を読み直すため更新には40〜60秒程度かかります</b>。画面を閉じずにそのままお待ちください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
