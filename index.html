@@ -1182,7 +1182,13 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok){
         const over = meta.roster.length > PLAYER_ROWS;
-        toast(over ? `「${out.sheetName}」に書き込みました（先頭${PLAYER_ROWS}人分のみ）` : `「${out.sheetName}」に書き込みました`);
+        const writeMsg = over ? `「${out.sheetName}」に書き込みました（先頭${PLAYER_ROWS}人分のみ）` : `「${out.sheetName}」に書き込みました`;
+        // 書き込みに続けてサーバー側で集計更新も自動実行される（設計上、
+        // 集計更新の失敗は書き込み自体の成功とは切り離して扱われる）。
+        const totalsMsg = out.totalsUpdated
+          ? `／集計も更新しました（${out.totalsCount}件）`
+          : `／集計の更新に失敗しました（${out.totalsError || "不明なエラー"}）。スタッツタブから手動で再試行してください`;
+        toast(writeMsg + totalsMsg);
         if(out.gid !== undefined && out.gid !== null){
           const url = spreadsheetEditUrl(ssId, out.gid);
           lastSentSheet = { name: out.sheetName, url };
@@ -1199,6 +1205,37 @@ if (!window.storage) {
       toast("送信できませんでした（通信状態・URLを確認してください）");
     }finally{
       gasSending = false; render();
+    }
+  }
+
+  let totalsUpdating = false;
+
+  async function updateTotals(){
+    if(totalsUpdating){ toast("更新中です。少しお待ちください"); return; }
+    const ssId = spreadsheetIdFrom(meta.sheetUrl);
+    if(!ssId){ toast("STATSシートのURLが未設定または不正です（設定タブ）"); return; }
+
+    totalsUpdating = true; render();
+    try{
+      const res = await fetch(GAS_WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ spreadsheetId: ssId, action: "updateTotals" }),
+        redirect: "follow"
+      });
+      const text = await res.text();
+      let out = null;
+      try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
+      if(out && out.ok){
+        toast(`集計を更新しました（${out.count}件）`);
+      }else{
+        toast((out && out.error) ? `更新失敗: ${out.error}` : "更新に失敗しました（スクリプト側の設定を確認してください）");
+      }
+    }catch(e){
+      console.error(e);
+      toast("送信できませんでした（通信状態・URLを確認してください）");
+    }finally{
+      totalsUpdating = false; render();
     }
   }
 
@@ -1713,6 +1750,21 @@ if (!window.storage) {
           </div>
         </div>`;
     }
+    if(modal.type === "confirmUpdateTotals"){
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>集計を更新しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
+              TOTALシートの集計（勝敗・個人成績など）を、現在の各試合シートの内容をもとに再計算し、数値として書き込み直します。何度でも安全に実行できます。
+            </div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn secondary" id="bbCancelUpdateTotals" style="flex:1;">キャンセル</button>
+              <button class="bb-btn" id="bbConfirmUpdateTotals" style="flex:1;">更新する</button>
+            </div>
+          </div>
+        </div>`;
+    }
     if(modal.type === "confirmClearSheetUrl"){
       return `
         <div class="bb-modal-overlay" id="bbModalOverlay">
@@ -1909,7 +1961,15 @@ if (!window.storage) {
         <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":"この試合のシートを作成して一括入力（長押し）"}</button>
         ${lastSentSheet ? `<a href="${esc(lastSentSheet.url)}" target="_blank" rel="noopener" id="bbOpenLastSent" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">「${esc(lastSentSheet.name)}」を開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みに続けて、下の「TOTALシートの集計を更新」も自動的に実行されます。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+        </div>
+      </div>
+
+      <div class="bb-section-title">集計（TOTALシート）を更新</div>
+      <div class="bb-card" style="padding:10px 12px;">
+        <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新"}</button>
+        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時にタップしてください。何度でも安全に実行できます。
         </div>
       </div>
 
@@ -2167,6 +2227,8 @@ if (!window.storage) {
       if(klBtn) klBtn.addEventListener("click", ()=>copyRange("kl"));
       const openBtn = document.getElementById("bbOpenSheetBtn");
       if(openBtn) openBtn.addEventListener("click", openSheet);
+      const updateTotalsBtn = document.getElementById("bbUpdateTotals");
+      if(updateTotalsBtn && !totalsUpdating) updateTotalsBtn.addEventListener("click", ()=>{ modal = {type:"confirmUpdateTotals"}; render(); });
     }
 
     // ---- modal handlers (apply regardless of active tab) ----
@@ -2306,6 +2368,16 @@ if (!window.storage) {
           modal = null;
           render();
           sendToSheet();
+        });
+      }
+      if(modal.type === "confirmUpdateTotals"){
+        const cancelBtn = document.getElementById("bbCancelUpdateTotals");
+        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+        const confirmBtn = document.getElementById("bbConfirmUpdateTotals");
+        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+          modal = null;
+          render();
+          updateTotals();
         });
       }
       if(modal.type === "confirmClearSheetUrl"){
