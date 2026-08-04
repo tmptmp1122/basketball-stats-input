@@ -412,7 +412,7 @@ if (!window.storage) {
     const d = TEAM_DEFAULTS[teamMode];
     return {
       teamName: d.teamName,
-      opponentName: "対戦相手",
+      opponentName: "",
       date: date || todayLocal(),
       gameNumber: gameNumber || 1,
       gameTitle: "",
@@ -1966,7 +1966,7 @@ if (!window.storage) {
         <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":"この試合のシートを作成して一括入力（長押し）"}</button>
         ${lastSentSheet ? `<a href="${esc(lastSentSheet.url)}" target="_blank" rel="noopener" id="bbOpenLastSent" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">「${esc(lastSentSheet.name)}」を開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みに続けて、下の「TOTALシートの集計を更新」も自動的に実行されます。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みに続けて、下の「TOTALシートの集計を更新」も自動的に実行されます。実行後は新しいタブで自動的に開こうとしますが、ポップアップブロックにより開けない場合は上のリンクから開けます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。<b>対戦相手名・試合名称・試合会場が空欄の場合は実行できません</b>（設定タブで入力してください）。
         </div>
       </div>
 
@@ -1974,7 +1974,7 @@ if (!window.storage) {
       <div class="bb-card" style="padding:10px 12px;">
         <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行後は新しいタブでTOTALシートを自動的に開こうとしますが、ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。全試合分を読み直して再計算するため、<b>更新には40〜60秒程度かかります</b>（「更新中…」の表示のまま、途中で画面を閉じずにお待ちください）。実行後は新しいタブでTOTALシートを自動的に開こうとしますが、ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
@@ -2214,6 +2214,14 @@ if (!window.storage) {
           clearTimeout(sendPressTimer);
           sendPressTimer = setTimeout(()=>{
             sendPressTimer = null;
+            const missing = [];
+            if(!String(meta.opponentName||"").trim()) missing.push("対戦相手名");
+            if(!String(meta.gameTitle||"").trim()) missing.push("試合名称");
+            if(!String(meta.venue||"").trim()) missing.push("試合会場");
+            if(missing.length){
+              toast(`${missing.join("・")}を入力してから実行してください（設定タブ）`);
+              return;
+            }
             vibrate(25);
             modal = {type:"confirmSendSheet"};
             render();
