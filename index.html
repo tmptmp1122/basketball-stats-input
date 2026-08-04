@@ -1967,9 +1967,9 @@ if (!window.storage) {
 
       <div class="bb-section-title">集計（TOTALシート）を更新</div>
       <div class="bb-card" style="padding:10px 12px;">
-        <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新"}</button>
+        <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時にタップしてください。何度でも安全に実行できます。
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
@@ -2228,7 +2228,24 @@ if (!window.storage) {
       const openBtn = document.getElementById("bbOpenSheetBtn");
       if(openBtn) openBtn.addEventListener("click", openSheet);
       const updateTotalsBtn = document.getElementById("bbUpdateTotals");
-      if(updateTotalsBtn && !totalsUpdating) updateTotalsBtn.addEventListener("click", ()=>{ modal = {type:"confirmUpdateTotals"}; render(); });
+      if(updateTotalsBtn && !totalsUpdating){
+        let updateTotalsPressTimer = null;
+        const startUpdateTotalsPress = ()=>{
+          clearTimeout(updateTotalsPressTimer);
+          updateTotalsPressTimer = setTimeout(()=>{
+            updateTotalsPressTimer = null;
+            vibrate(25);
+            modal = {type:"confirmUpdateTotals"};
+            render();
+          }, 550);
+        };
+        const cancelUpdateTotalsPress = ()=>{ clearTimeout(updateTotalsPressTimer); updateTotalsPressTimer = null; };
+        updateTotalsBtn.addEventListener("pointerdown", startUpdateTotalsPress);
+        updateTotalsBtn.addEventListener("pointerup", cancelUpdateTotalsPress);
+        updateTotalsBtn.addEventListener("pointerleave", cancelUpdateTotalsPress);
+        updateTotalsBtn.addEventListener("pointercancel", cancelUpdateTotalsPress);
+        updateTotalsBtn.addEventListener("click", (e)=>{ e.preventDefault(); });
+      }
     }
 
     // ---- modal handlers (apply regardless of active tab) ----
