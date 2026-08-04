@@ -356,7 +356,7 @@ if (!window.storage) {
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(toast._h);
-    toast._h = setTimeout(()=>t.classList.remove("show"), 1600);
+    toast._h = setTimeout(()=>t.classList.remove("show"), 3000);
   }
 
   // ---------- app state ----------
@@ -505,6 +505,7 @@ if (!window.storage) {
   async function loadCurrentTeamData(opts){
     const isInitial = !!(opts && opts.initial);
     lastSentSheet = null;
+    lastTotalsUrl = null;
     let idx = null;
     try{ const res = await window.storage.get(indexKey(), false); idx = res ? JSON.parse(res.value) : null; }catch(e){ idx = null; }
 
@@ -611,6 +612,7 @@ if (!window.storage) {
   async function switchToGameInner(id){
     if(id === gameIndex.currentGameId) return;
     lastSentSheet = null;
+    lastTotalsUrl = null;
     let m = null, ev = null;
     try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
@@ -661,6 +663,7 @@ if (!window.storage) {
     const preservedRoster = JSON.parse(JSON.stringify(meta && meta.roster ? meta.roster : []));
     const preservedSheetUrl = meta && meta.sheetUrl ? meta.sheetUrl : null;
     lastSentSheet = null;
+    lastTotalsUrl = null;
     const id = newGameId();
     meta = freshMeta(date, gameNumber);
     meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
@@ -1128,6 +1131,7 @@ if (!window.storage) {
   const TEMPLATE_SHEET_NAME = "SありBASE";
   let gasSending = false;
   let lastSentSheet = null; // {gid, name, url} — set after a successful write, for the manual "open" fallback
+  let lastTotalsUrl = null; // url — set after fetching the TOTAL sheet gid, for the manual "open" fallback
 
   function spreadsheetIdFrom(url){
     const m = String(url||"").match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -1250,8 +1254,10 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok && out.gid !== undefined && out.gid !== null){
         const url = spreadsheetEditUrl(ssId, out.gid);
+        lastTotalsUrl = url;
+        render();
         const popup = window.open(url, "_blank");
-        if(!popup){ toast("ポップアップがブロックされました。設定タブのURLからTOTALシートを開いてください"); }
+        if(!popup){ toast("ポップアップがブロックされました。下のリンクから開いてください"); }
       }
     }catch(e){
       console.error(e);
@@ -2022,8 +2028,9 @@ if (!window.storage) {
       <div class="bb-section-title">集計（TOTALシート）を更新</div>
       <div class="bb-card" style="padding:10px 12px;">
         <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
+        ${lastTotalsUrl ? `<a href="${esc(lastTotalsUrl)}" target="_blank" rel="noopener" id="bbOpenLastTotals" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">TOTALシートを開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行するとすぐに新しいタブでTOTALシートを開こうとします（ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください）。集計の再計算は裏側で続いており、<b style="color:var(--whistle);">全試合分を読み直すため更新には40〜60秒程度かかります</b>。画面を閉じずにそのままお待ちください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行するとすぐに新しいタブでTOTALシートを開こうとします（ポップアップブロックにより開けない場合は上のリンクから開けます）。集計の再計算は裏側で続いており、<b style="color:var(--whistle);">全試合分を読み直すため更新には40〜60秒程度かかります</b>。画面を閉じずにそのままお待ちください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
