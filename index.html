@@ -1228,6 +1228,11 @@ if (!window.storage) {
       try{ out = JSON.parse(text); }catch(e){ /* non-JSON reply */ }
       if(out && out.ok){
         toast(`集計を更新しました（${out.count}件）`);
+        if(out.gid !== undefined && out.gid !== null){
+          const url = spreadsheetEditUrl(ssId, out.gid);
+          const popup = window.open(url, "_blank");
+          if(!popup){ toast("ポップアップがブロックされました。設定タブのURLからTOTALシートを開いてください"); }
+        }
       }else{
         toast((out && out.error) ? `更新失敗: ${out.error}` : "更新に失敗しました（スクリプト側の設定を確認してください）");
       }
@@ -1969,7 +1974,7 @@ if (!window.storage) {
       <div class="bb-card" style="padding:10px 12px;">
         <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行後は新しいタブでTOTALシートを自動的に開こうとしますが、ポップアップブロックにより開けない場合は設定タブのURLから手動で開いてください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
