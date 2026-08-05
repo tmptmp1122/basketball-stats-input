@@ -2140,7 +2140,7 @@ if (!window.storage) {
     const {header, rows: body} = buildExportRows(true);
     const sum = (idx) => body.reduce((a,r)=>a+(Number(r[idx])||0),0);
     return `
-      <div class="bb-section-title">スプレッドシートに貼り付け</div>
+      <div class="bb-section-title">スプレッドシートに貼り付け（手動）</div>
       <div class="bb-card" style="padding:10px 12px;">
         <div class="bb-row" style="gap:8px;">
           <button class="bb-btn" id="bbCopyCG" style="flex:1;">① C10:G36 コピー</button>
@@ -2153,23 +2153,21 @@ if (!window.storage) {
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
           ①はC10セル、②はK10セルをクリックしてから貼り付けてください。選手の並び順は下の登録順（＝シートの行順）に対応しています。
         </div>
+        <div class="bb-row" style="gap:8px; margin-top:14px;">
+          <button class="bb-btn" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"④ TOTALシートの集計を更新（長押し）"}</button>
+        </div>
+        ${lastTotalsUrl ? `<a href="${esc(lastTotalsUrl)}" target="_blank" rel="noopener" id="bbOpenLastTotals" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">TOTALシートを開く ↗</a>` : ""}
+        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
+          ④は、①②を貼り付け終えた後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行するとすぐに新しいタブでTOTALシートを開こうとします（ポップアップブロックにより開けない場合は上のリンクから開けます）。集計の再計算は裏側で続いており、全試合分を読み直すため更新には5〜10秒程度かかります。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
+        </div>
       </div>
 
-      <div class="bb-section-title">スプレッドシートに一括入力</div>
+      <div class="bb-section-title">スプレッドシートに一括入力（全自動）</div>
       <div class="bb-card" style="padding:10px 12px;">
         <button class="bb-btn" id="bbSendSheet" style="width:100%; ${gasSending?"opacity:.6;":""}" ${gasSending?"disabled":""}>${gasSending?"送信中…":"この試合のシートを作成して一括入力（長押し）"}</button>
         ${lastSentSheet ? `<a href="${esc(lastSentSheet.url)}" target="_blank" rel="noopener" id="bbOpenLastSent" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">「${esc(lastSentSheet.name)}」を開く ↗</a>` : ""}
         <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
           「${esc(TEMPLATE_SHEET_NAME)}」をコピーして「日付_試合数vs対戦相手名」という名前のシートを作成し（startsheetの右隣に配置）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の範囲をまとめて直接書き込みます（コピー＆貼り付け不要）。同じ試合で再度実行した場合は同じシートを上書きするため、以前の内容が残ることはありません。書き込みが終わり次第すぐに新しいタブでそのシートを自動的に開こうとします（ポップアップブロックにより開けない場合は上のリンクから開けます）。続けて、TOTALシートの集計も裏側で自動的に更新されます（画面を切り替えなくても構いません）。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。<b>対戦相手名・試合名称・試合会場が空欄の場合は実行できません</b>（設定タブで入力してください）。
-        </div>
-      </div>
-
-      <div class="bb-section-title">集計（TOTALシート）を更新</div>
-      <div class="bb-card" style="padding:10px 12px;">
-        <button class="bb-btn secondary" id="bbUpdateTotals" style="width:100%; ${totalsUpdating?"opacity:.6;":""}" ${totalsUpdating?"disabled":""}>${totalsUpdating?"更新中…":"TOTALシートの集計を更新（長押し）"}</button>
-        ${lastTotalsUrl ? `<a href="${esc(lastTotalsUrl)}" target="_blank" rel="noopener" id="bbOpenLastTotals" style="display:block; text-align:center; margin-top:8px; padding:9px 12px; border-radius:8px; background:var(--panel2); border:1px solid var(--whistle); color:var(--whistle); font-size:12px; text-decoration:none;">TOTALシートを開く ↗</a>` : ""}
-        <div style="font-size:11px; color:var(--chalk-dim); margin-top:8px; line-height:1.6;">
-          新しい試合シートを追加した後など、TOTALシート（勝敗・個人成績など）を最新の内容に反映したい時に使ってください。何度でも安全に実行できます。実行するとすぐに新しいタブでTOTALシートを開こうとします（ポップアップブロックにより開けない場合は上のリンクから開けます）。集計の再計算は裏側で続いており、<b style="color:var(--whistle);">全試合分を読み直すため更新には40〜60秒程度かかります</b>。画面を閉じずにそのままお待ちください。誤操作防止のため、ボタンは長押ししてから確認画面で実行します。
         </div>
       </div>
 
