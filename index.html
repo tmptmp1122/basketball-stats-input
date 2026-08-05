@@ -809,6 +809,9 @@ if (!window.storage) {
   let lastRecordKey = null;
   let lastRecordTs = 0;
   const RECORD_DEBOUNCE_MS = 150;
+  // Shared threshold for every "hold to confirm" control (reorder toggle,
+  // 一括入力, TOTAL更新) — one place to change if the timing ever needs tuning.
+  const LONG_PRESS_MS = 550;
   function debounced(key){
     const now = Date.now();
     if(key === lastRecordKey && now - lastRecordTs < RECORD_DEBOUNCE_MS) return true;
@@ -1151,12 +1154,15 @@ if (!window.storage) {
   }
 
   // Preview only — mirrors the naming logic that actually runs on the GAS
-  // side, so the confirmation dialog can show the user what sheet name to expect.
+  // side (buildGameSheetName in StatsWebApp.gs), so the confirmation dialog
+  // shows the user the exact name that will actually be created. Keep the
+  // forbidden-character replacement in sync with that function if it changes.
   function computeGameSheetName(){
     const datePart = String(meta.date||"").replace(/-/g, ".");
     const num = meta.gameNumber || 1;
     const opp = meta.opponentName || "";
-    return `${datePart}_${num}vs${opp}`;
+    const name = `${datePart}_${num}vs${opp}`;
+    return name.replace(/[\[\]\*\?\/\\:]/g, "_");
   }
 
   async function sendToSheet(){
@@ -1627,409 +1633,460 @@ if (!window.storage) {
     `;
   }
 
+  // ---- modal renderers ----
+  // One function per modal.type (mirrors the old if-chain 1:1, just split
+  // apart) plus a lookup table, so renderModal() itself stays a thin
+  // dispatcher instead of a single 400-line if-chain. Parameter is named `m`
+  // rather than `modal` deliberately — see the attach-side note below for why.
+  function renderSubModal(m){
+    const onCourt = currentOnCourt();
+    const benchIds = meta.roster.filter(p=>!onCourt.includes(p.id));
+    const benchHtml = benchIds.length===0 ? '<div class="bb-empty">ベンチに選手がいません</div>' :
+      benchIds.map(p=>{
+        const s = computeStats(p.id);
+        return `<div class="bb-bench-chip" data-bench="${p.id}">#${esc(p.number)} ${esc(p.name)} <span style="color:var(--chalk-dim)">(${s.pts}点)</span></div>`;
+      }).join("");
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${m.isInitial ? "出場する選手を選択" : "交代で入る選手を選択"}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div class="bb-bench-list">${benchHtml}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderOpponentModal(m){
+    const rows = [1,2,3,4].map(q => `
+      <div class="bb-edit-row-top" style="margin-top:8px;">
+        <span>${q}Q: ${meta.opponent[q]||0}点</span>
+        <span class="bb-row" style="gap:4px;">
+          <button class="bb-btn secondary" data-opp-q="${q}" data-opp="1" style="padding:6px 10px;">＋1</button>
+          <button class="bb-btn secondary" data-opp-q="${q}" data-opp="2" style="padding:6px 10px;">＋2</button>
+          <button class="bb-btn secondary" data-opp-q="${q}" data-opp="3" style="padding:6px 10px;">＋3</button>
+          <button class="bb-btn secondary" data-opp-q="${q}" data-opp="-1" style="padding:6px 10px;">−1</button>
+        </span>
+      </div>`).join("");
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>相手チームの得点（合計 ${oppTotalScore()}）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          ${rows}
+        </div>
+      </div>`;
+  }
+
+  function renderLogModal(m){
+    const onlyFlagged = !!m.onlyFlagged;
+    const allEvs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
+    const flaggedTotal = allEvs.filter(e=>e.flagged).length;
+    const evs = onlyFlagged ? allEvs.filter(e=>e.flagged) : allEvs;
+    const rowsHtml = evs.length===0 ? `<div class="bb-empty">${onlyFlagged ? "🚩が付いた記録はありません" : "まだ記録がありません"}</div>` : evs.map(e=>`
+      <div class="bb-edit-row ${e.flagged ? 'flagged' : ''}">
+        <div class="bb-edit-row-top">
+          <span>${e.quarter}Q・${esc(eventLabel(e))}</span>
+          <span class="bb-row" style="gap:6px;">
+            <button class="bb-flag-btn ${e.flagged ? 'active' : ''}" data-toggle-flag="${e.id}" title="気になる記録としてマーク">🚩</button>
+            <button class="bb-edit-del" data-ask-log-del="${e.id}">削除</button>
+          </span>
+        </div>
+        <div class="bb-edit-row-controls">
+          ${e.playerId === OWNGOAL_ID
+            ? `<div class="bb-edit-select" style="display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">🥅 オウンゴール</div>`
+            : `<select class="bb-edit-select" data-log-player="${e.id}">${meta.roster.map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>`}
+          <select class="bb-edit-select" data-log-type="${e.id}">${(e.playerId===OWNGOAL_ID ? ["2m","2x","3m","3x"] : Object.keys(STAT_TYPES)).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
+          <div class="bb-edit-select" style="flex:0 0 52px; display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">${e.quarter}Q</div>
+        </div>
+        ${e.type==="ft" ? `
+        <div class="bb-edit-row-controls" style="margin-top:6px;">
+          <select class="bb-edit-select" data-log-ft-awarded="${e.id}">${[1,2,3].map(n=>`<option value="${n}" ${n===e.awarded?"selected":""}>もらった${n}本</option>`).join("")}</select>
+          <select class="bb-edit-select" data-log-ft-made="${e.id}">${[0,1,2,3].filter(m2=>m2<=e.awarded).map(m2=>`<option value="${m2}" ${m2===e.made?"selected":""}>決めた${m2}本</option>`).join("")}</select>
+        </div>` : ""}
+      </div>`).join("");
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>記録一覧・訂正</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:10px;">
+            <input type="checkbox" id="bbOnlyFlagged" ${onlyFlagged?"checked":""}/> 🚩気になる記録のみ表示${flaggedTotal ? `（${flaggedTotal}件）` : ""}
+          </label>
+          ${rowsHtml}
+        </div>
+      </div>`;
+  }
+
+  function renderFtModal(m){
+    const p = playerName(selectedPlayer);
+    if(!m.awarded){
+      return `
+        <div class="bb-modal-overlay" id="bbModalOverlay">
+          <div class="bb-modal">
+            <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー：もらった本数は？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+            <div class="bb-row" style="gap:8px;">
+              <button class="bb-btn" data-ft-awarded="1" style="flex:1; padding:16px 0; font-size:16px;">1本<br/><span style="font-size:11px; opacity:0.8;">(カウントワン)</span></button>
+              <button class="bb-btn" data-ft-awarded="2" style="flex:1; padding:16px 0; font-size:16px;">2本</button>
+              <button class="bb-btn" data-ft-awarded="3" style="flex:1; padding:16px 0; font-size:16px;">3本</button>
+            </div>
+          </div>
+        </div>`;
+    }
+    const n = m.awarded;
+    const madeBtns = [];
+    for(let i=0; i<=n; i++) madeBtns.push(`<button class="bb-btn ${i===n?'':'secondary'}" data-ft-made="${i}" style="flex:1; padding:16px 0; font-size:16px;">${i}本</button>`);
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー ${n}本中、決めたのは？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div class="bb-row" style="gap:8px;">${madeBtns.join("")}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderManualCopyModal(m){
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${esc(m.label)} 用データ（自動コピー不可）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:8px;">
+            このブラウザでは自動コピーができませんでした。下の欄は選択済みなので、そのまま長押し→コピー（または Ctrl/Cmd+C）でコピーしてください。
+          </div>
+          <textarea id="bbManualCopyArea" readonly style="width:100%; height:140px; background:var(--ink); color:var(--chalk); border:1px solid var(--line); border-radius:8px; padding:8px; font-size:12px; font-family:monospace;">${esc(m.text)}</textarea>
+          <button class="bb-btn" id="bbManualCopyBtn" style="width:100%; margin-top:8px;">もう一度コピーを試す</button>
+        </div>
+      </div>`;
+  }
+
+  function renderEditPlayerModal(m){
+    const p = meta.roster.find(pl=>pl.id===m.playerId);
+    if(!p) return "";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>選手情報を編集</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <span class="bb-label">背番号</span>
+          <input class="bb-input" id="bbEditNum" value="${esc(p.number)}" style="margin-bottom:10px;"/>
+          <span class="bb-label">選手名</span>
+          <input class="bb-input" id="bbEditName" value="${esc(p.name)}" style="margin-bottom:14px;"/>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn" id="bbEditSave" style="flex:1;">保存</button>
+            <button class="bb-btn danger" id="bbEditDelete" style="flex:1;">この選手を削除</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmDeleteModal(m){
+    const p = meta.roster.find(pl=>pl.id===m.playerId);
+    const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${name} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">記録済みのスタッツも一緒に表示されなくなります。この操作は取り消せません。</div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelDelete" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmDelete" style="flex:1;">削除する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmReorderModal(m){
+    const p = meta.roster.find(pl=>pl.id===m.playerId);
+    const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+    const dirLabel = m.direction === "up" ? "1つ上" : "1つ下";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>並び順を変更しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            ${name} を${dirLabel}に移動します。並び順はスプレッドシートに貼り付ける行の順番に対応しています。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelReorder" style="flex:1;">キャンセル</button>
+            <button class="bb-btn" id="bbConfirmReorder" style="flex:1;">移動する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmRemoveCourtModal(m){
+    const pid = currentOnCourt()[m.slot];
+    const p = pid ? playerName(pid) : null;
+    const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${name} をコートから外しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            「削除」はスタメンの選び間違いなど、実際には出場していなかった場合の訂正用です。<b>交代とは違い、出場時限の分け合いは発生しません。</b>記録済みのスタッツ自体は消えません。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelRemoveCourt" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmRemoveCourt" style="flex:1;">コートから外す</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderGameSwitchModal(m){
+    const sorted = gameIndex.games.slice().sort((a,b)=> (b.date||"").localeCompare(a.date||"") || (b.gameNumber||0)-(a.gameNumber||0));
+    const rows = sorted.map(g => `
+      <div class="bb-player-row">
+        <div class="bb-player-name" data-switch-game="${g.id}" style="cursor:pointer; ${g.id===gameIndex.currentGameId ? 'color:var(--gold); font-weight:800;' : ''}">
+          ${esc(gameLabel(g))} ${g.id===gameIndex.currentGameId ? "（現在）" : ""}
+        </div>
+        ${gameIndex.games.length>1 ? `<button class="bb-icon-btn del" data-ask-delete-game="${g.id}">✕</button>` : ""}
+      </div>`).join("");
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>試合を切り替える</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          ${rows || '<div class="bb-empty">試合がありません</div>'}
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmDeleteGameModal(m){
+    const g = gameIndex.games.find(g=>g.id===m.id);
+    const name = g ? gameLabel(g) : "この試合";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${esc(name)} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">この試合の選手登録・記録もすべて削除されます。この操作は取り消せません。</div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelDeleteGame" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmDeleteGame" style="flex:1;">削除する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderNewGameModal(m){
+    const date = m.date || todayLocal();
+    const gameNumber = m.gameNumber || suggestedGameNumber(date);
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div class="bb-row" style="margin-bottom:14px; align-items:stretch;">
+            <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}" style="flex:1.4; min-width:0;"/>
+            <div class="bb-inline-gamenum">${gameNumber}試合目</div>
+            <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
+            <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
+          </div>
+          <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
+          <button class="bb-btn" id="bbCreateGame" style="width:100%;">この内容で作成</button>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmClearAllModal(m){
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>全データを削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            この端末に保存されている<b>すべての試合・記録・スタッツ</b>が削除されます。<b>選手登録（背番号・名前）・STATSシートURLは残ります。</b>この操作は取り消せません。大事な記録は先にスプレッドシートへコピーしておいてください。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelClearAll" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmClearAll" style="flex:1;">すべて削除する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmSendSheetModal(m){
+    const over = meta.roster.length > PLAYER_ROWS;
+    const previewName = computeGameSheetName();
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>この試合のシートを作成しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
+            「${esc(TEMPLATE_SHEET_NAME)}」をコピーして、シート名「<b>${esc(previewName)}</b>」を作成し（同名のシートが既にある場合はそのシートを使います）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の対象範囲（C10:G36 / K10:L36）を書き込みます。同名シートに既に入力済みの内容があっても<b>まるごと上書き</b>されます。この操作は取り消せません。${over ? `<br>選手が${PLAYER_ROWS}人を超えているため、先頭${PLAYER_ROWS}人分のみ反映されます。` : ""}
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelSendSheet" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmSendSheet" style="flex:1;">作成して一括入力する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmUpdateTotalsModal(m){
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>集計を更新しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
+            TOTALシートの集計（勝敗・個人成績など）を、現在の各試合シートの内容をもとに再計算し、数値として書き込み直します。何度でも安全に実行できます。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelUpdateTotals" style="flex:1;">キャンセル</button>
+            <button class="bb-btn" id="bbConfirmUpdateTotals" style="flex:1;">更新する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmClearSheetUrlModal(m){
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>STATSシートのURLをクリアしますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            保存されているURLが空欄になります。「③ シートを開く」が使えなくなります。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelClearSheetUrl" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmClearSheetUrl" style="flex:1;">クリアする</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmBulkImportModal(m){
+    const parsed = parseRosterLines(m.text);
+    const preview = parsed.slice(0, 6).map(p => `#${esc(p.number)} ${esc(p.name)}`).join("、") + (parsed.length > 6 ? ` 他${parsed.length-6}名` : "");
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>選手一覧を置き換えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            現在の選手登録（${meta.roster.length}名）を、貼り付けた${parsed.length}名に<b>丸ごと置き換えます</b>。この操作は取り消せません。<br/><br/>
+            ${parsed.length ? esc(preview) : '<span style="color:var(--whistle);">有効な行が見つかりませんでした</span>'}
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelBulkImport" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmBulkImport" style="flex:1;" ${parsed.length?"":"disabled"}>置き換える</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmDeleteLogModal(m){
+    const e = evState.events.find(ev=>ev.id===m.id);
+    const p = e ? playerName(e.playerId) : null;
+    const label = e ? `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}` : "この記録";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>この記録を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この操作は取り消せません。</div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelDeleteLog" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmDeleteLog" style="flex:1;">削除する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmEditLogModal(m){
+    const e = evState.events.find(ev=>ev.id===m.id);
+    if(!e) return "";
+    const p = playerName(e.playerId);
+    const context = `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}`;
+    let fromLabel, toLabel, heading;
+    if(m.field === "playerId"){
+      const newP = playerName(m.value);
+      heading = "選手を変更しますか？";
+      fromLabel = `#${esc(p.number)} ${esc(p.name)}`;
+      toLabel = `#${esc(newP.number)} ${esc(newP.name)}`;
+    }else{
+      heading = "種類を変更しますか？";
+      fromLabel = esc(STAT_TYPES[e.type] ? STAT_TYPES[e.type].label : e.type);
+      toLabel = esc(STAT_TYPES[m.value] ? STAT_TYPES[m.value].label : m.value);
+    }
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>${heading}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            ${context}<br/><br/>
+            <b>${fromLabel}</b> → <b style="color:var(--gold);">${toLabel}</b> に変更します。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelEditLog" style="flex:1;">キャンセル</button>
+            <button class="bb-btn" id="bbConfirmEditLog" style="flex:1;">変更する</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmUndoModal(m){
+    const real = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot");
+    const last = real[real.length-1];
+    const p = last ? playerName(last.playerId) : null;
+    const label = last ? `${last.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(last))}` : "直前の記録";
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>直前の記録を戻しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この記録が取り消されます。</div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelUndo" style="flex:1;">キャンセル</button>
+            <button class="bb-btn danger" id="bbConfirmUndo" style="flex:1;" ${last?"":"disabled"}>戻す</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderConfirmReorderPositionsModal(m){
+    const order = currentDisplayOrder();
+    const onCourt = currentOnCourt();
+    const nameAt = (pos) => {
+      const slotIdx = order[pos];
+      const pid = onCourt[slotIdx];
+      if(!pid) return "空き枠";
+      const p = playerName(pid);
+      return `#${esc(p.number)} ${esc(p.name)}`;
+    };
+    return `
+      <div class="bb-modal-overlay" id="bbModalOverlay">
+        <div class="bb-modal">
+          <div class="bb-modal-head"><h3>表示位置を入れ替えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
+          <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
+            <b>${nameAt(m.posA)}</b> と <b>${nameAt(m.posB)}</b> の表示位置を入れ替えます。<br/>
+            このクオーターの見た目だけが変わります(出場データには影響しません)。
+          </div>
+          <div class="bb-row" style="gap:8px;">
+            <button class="bb-btn secondary" id="bbCancelReorderPositions" style="flex:1;">キャンセル</button>
+            <button class="bb-btn" id="bbConfirmReorderPositions" style="flex:1;">入れ替える</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const MODAL_RENDERERS = {
+    sub: renderSubModal,
+    opponent: renderOpponentModal,
+    log: renderLogModal,
+    ft: renderFtModal,
+    manualcopy: renderManualCopyModal,
+    editPlayer: renderEditPlayerModal,
+    confirmDelete: renderConfirmDeleteModal,
+    confirmReorder: renderConfirmReorderModal,
+    confirmRemoveCourt: renderConfirmRemoveCourtModal,
+    gameSwitch: renderGameSwitchModal,
+    confirmDeleteGame: renderConfirmDeleteGameModal,
+    newGame: renderNewGameModal,
+    confirmClearAll: renderConfirmClearAllModal,
+    confirmSendSheet: renderConfirmSendSheetModal,
+    confirmUpdateTotals: renderConfirmUpdateTotalsModal,
+    confirmClearSheetUrl: renderConfirmClearSheetUrlModal,
+    confirmBulkImport: renderConfirmBulkImportModal,
+    confirmDeleteLog: renderConfirmDeleteLogModal,
+    confirmEditLog: renderConfirmEditLogModal,
+    confirmUndo: renderConfirmUndoModal,
+    confirmReorderPositions: renderConfirmReorderPositionsModal
+  };
+
   function renderModal(){
     if(!modal) return "";
-    if(modal.type === "sub"){
-      const onCourt = currentOnCourt();
-      const benchIds = meta.roster.filter(p=>!onCourt.includes(p.id));
-      const benchHtml = benchIds.length===0 ? '<div class="bb-empty">ベンチに選手がいません</div>' :
-        benchIds.map(p=>{
-          const s = computeStats(p.id);
-          return `<div class="bb-bench-chip" data-bench="${p.id}">#${esc(p.number)} ${esc(p.name)} <span style="color:var(--chalk-dim)">(${s.pts}点)</span></div>`;
-        }).join("");
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${modal.isInitial ? "出場する選手を選択" : "交代で入る選手を選択"}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div class="bb-bench-list">${benchHtml}</div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "opponent"){
-      const rows = [1,2,3,4].map(q => `
-        <div class="bb-edit-row-top" style="margin-top:8px;">
-          <span>${q}Q: ${meta.opponent[q]||0}点</span>
-          <span class="bb-row" style="gap:4px;">
-            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="1" style="padding:6px 10px;">＋1</button>
-            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="2" style="padding:6px 10px;">＋2</button>
-            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="3" style="padding:6px 10px;">＋3</button>
-            <button class="bb-btn secondary" data-opp-q="${q}" data-opp="-1" style="padding:6px 10px;">−1</button>
-          </span>
-        </div>`).join("");
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>相手チームの得点（合計 ${oppTotalScore()}）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            ${rows}
-          </div>
-        </div>`;
-    }
-    if(modal.type === "log"){
-      const onlyFlagged = !!modal.onlyFlagged;
-      const allEvs = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot").slice().reverse();
-      const flaggedTotal = allEvs.filter(e=>e.flagged).length;
-      const evs = onlyFlagged ? allEvs.filter(e=>e.flagged) : allEvs;
-      const rowsHtml = evs.length===0 ? `<div class="bb-empty">${onlyFlagged ? "🚩が付いた記録はありません" : "まだ記録がありません"}</div>` : evs.map(e=>`
-        <div class="bb-edit-row ${e.flagged ? 'flagged' : ''}">
-          <div class="bb-edit-row-top">
-            <span>${e.quarter}Q・${esc(eventLabel(e))}</span>
-            <span class="bb-row" style="gap:6px;">
-              <button class="bb-flag-btn ${e.flagged ? 'active' : ''}" data-toggle-flag="${e.id}" title="気になる記録としてマーク">🚩</button>
-              <button class="bb-edit-del" data-ask-log-del="${e.id}">削除</button>
-            </span>
-          </div>
-          <div class="bb-edit-row-controls">
-            ${e.playerId === OWNGOAL_ID
-              ? `<div class="bb-edit-select" style="display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">🥅 オウンゴール</div>`
-              : `<select class="bb-edit-select" data-log-player="${e.id}">${meta.roster.map(p=>`<option value="${p.id}" ${p.id===e.playerId?"selected":""}>#${esc(p.number)} ${esc(p.name)}</option>`).join("")}</select>`}
-            <select class="bb-edit-select" data-log-type="${e.id}">${(e.playerId===OWNGOAL_ID ? ["2m","2x","3m","3x"] : Object.keys(STAT_TYPES)).map(k=>`<option value="${k}" ${k===e.type?"selected":""}>${STAT_TYPES[k].label}</option>`).join("")}</select>
-            <div class="bb-edit-select" style="flex:0 0 52px; display:flex; align-items:center; justify-content:center; color:var(--chalk-dim);">${e.quarter}Q</div>
-          </div>
-          ${e.type==="ft" ? `
-          <div class="bb-edit-row-controls" style="margin-top:6px;">
-            <select class="bb-edit-select" data-log-ft-awarded="${e.id}">${[1,2,3].map(n=>`<option value="${n}" ${n===e.awarded?"selected":""}>もらった${n}本</option>`).join("")}</select>
-            <select class="bb-edit-select" data-log-ft-made="${e.id}">${[0,1,2,3].filter(m=>m<=e.awarded).map(m=>`<option value="${m}" ${m===e.made?"selected":""}>決めた${m}本</option>`).join("")}</select>
-          </div>` : ""}
-        </div>`).join("");
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>記録一覧・訂正</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:10px;">
-              <input type="checkbox" id="bbOnlyFlagged" ${onlyFlagged?"checked":""}/> 🚩気になる記録のみ表示${flaggedTotal ? `（${flaggedTotal}件）` : ""}
-            </label>
-            ${rowsHtml}
-          </div>
-        </div>`;
-    }
-    if(modal.type === "ft"){
-      const p = playerName(selectedPlayer);
-      if(!modal.awarded){
-        return `
-          <div class="bb-modal-overlay" id="bbModalOverlay">
-            <div class="bb-modal">
-              <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー：もらった本数は？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-              <div class="bb-row" style="gap:8px;">
-                <button class="bb-btn" data-ft-awarded="1" style="flex:1; padding:16px 0; font-size:16px;">1本<br/><span style="font-size:11px; opacity:0.8;">(カウントワン)</span></button>
-                <button class="bb-btn" data-ft-awarded="2" style="flex:1; padding:16px 0; font-size:16px;">2本</button>
-                <button class="bb-btn" data-ft-awarded="3" style="flex:1; padding:16px 0; font-size:16px;">3本</button>
-              </div>
-            </div>
-          </div>`;
-      }
-      const n = modal.awarded;
-      const madeBtns = [];
-      for(let m=0; m<=n; m++) madeBtns.push(`<button class="bb-btn ${m===n?'':'secondary'}" data-ft-made="${m}" style="flex:1; padding:16px 0; font-size:16px;">${m}本</button>`);
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>#${esc(p.number)} ${esc(p.name)} フリースロー ${n}本中、決めたのは？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div class="bb-row" style="gap:8px;">${madeBtns.join("")}</div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "manualcopy"){
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${esc(modal.label)} 用データ（自動コピー不可）</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:8px;">
-              このブラウザでは自動コピーができませんでした。下の欄は選択済みなので、そのまま長押し→コピー（または Ctrl/Cmd+C）でコピーしてください。
-            </div>
-            <textarea id="bbManualCopyArea" readonly style="width:100%; height:140px; background:var(--ink); color:var(--chalk); border:1px solid var(--line); border-radius:8px; padding:8px; font-size:12px; font-family:monospace;">${esc(modal.text)}</textarea>
-            <button class="bb-btn" id="bbManualCopyBtn" style="width:100%; margin-top:8px;">もう一度コピーを試す</button>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "editPlayer"){
-      const p = meta.roster.find(pl=>pl.id===modal.playerId);
-      if(!p) return "";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>選手情報を編集</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <span class="bb-label">背番号</span>
-            <input class="bb-input" id="bbEditNum" value="${esc(p.number)}" style="margin-bottom:10px;"/>
-            <span class="bb-label">選手名</span>
-            <input class="bb-input" id="bbEditName" value="${esc(p.name)}" style="margin-bottom:14px;"/>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn" id="bbEditSave" style="flex:1;">保存</button>
-              <button class="bb-btn danger" id="bbEditDelete" style="flex:1;">この選手を削除</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmDelete"){
-      const p = meta.roster.find(pl=>pl.id===modal.playerId);
-      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${name} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">記録済みのスタッツも一緒に表示されなくなります。この操作は取り消せません。</div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelDelete" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmDelete" style="flex:1;">削除する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmReorder"){
-      const p = meta.roster.find(pl=>pl.id===modal.playerId);
-      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
-      const dirLabel = modal.direction === "up" ? "1つ上" : "1つ下";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>並び順を変更しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              ${name} を${dirLabel}に移動します。並び順はスプレッドシートに貼り付ける行の順番に対応しています。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelReorder" style="flex:1;">キャンセル</button>
-              <button class="bb-btn" id="bbConfirmReorder" style="flex:1;">移動する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmRemoveCourt"){
-      const pid = currentOnCourt()[modal.slot];
-      const p = pid ? playerName(pid) : null;
-      const name = p ? `#${esc(p.number)} ${esc(p.name)}` : "この選手";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${name} をコートから外しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              「削除」はスタメンの選び間違いなど、実際には出場していなかった場合の訂正用です。<b>交代とは違い、出場時限の分け合いは発生しません。</b>記録済みのスタッツ自体は消えません。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelRemoveCourt" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmRemoveCourt" style="flex:1;">コートから外す</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "gameSwitch"){
-      const sorted = gameIndex.games.slice().sort((a,b)=> (b.date||"").localeCompare(a.date||"") || (b.gameNumber||0)-(a.gameNumber||0));
-      const rows = sorted.map(g => `
-        <div class="bb-player-row">
-          <div class="bb-player-name" data-switch-game="${g.id}" style="cursor:pointer; ${g.id===gameIndex.currentGameId ? 'color:var(--gold); font-weight:800;' : ''}">
-            ${esc(gameLabel(g))} ${g.id===gameIndex.currentGameId ? "（現在）" : ""}
-          </div>
-          ${gameIndex.games.length>1 ? `<button class="bb-icon-btn del" data-ask-delete-game="${g.id}">✕</button>` : ""}
-        </div>`).join("");
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>試合を切り替える</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            ${rows || '<div class="bb-empty">試合がありません</div>'}
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmDeleteGame"){
-      const g = gameIndex.games.find(g=>g.id===modal.id);
-      const name = g ? gameLabel(g) : "この試合";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${esc(name)} を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">この試合の選手登録・記録もすべて削除されます。この操作は取り消せません。</div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelDeleteGame" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmDeleteGame" style="flex:1;">削除する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "newGame"){
-      const date = modal.date || todayLocal();
-      const gameNumber = modal.gameNumber || suggestedGameNumber(date);
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>新しい試合を追加</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div class="bb-row" style="margin-bottom:14px; align-items:stretch;">
-              <input class="bb-input" id="bbNewGameDate" type="date" value="${esc(date)}" style="flex:1.4; min-width:0;"/>
-              <div class="bb-inline-gamenum">${gameNumber}試合目</div>
-              <button class="bb-stepper-btn" id="bbGameNumUp">＋</button>
-              <button class="bb-stepper-btn" id="bbGameNumDown" ${gameNumber<=1?"disabled":""}>－</button>
-            </div>
-            <div style="font-size:11px; color:var(--chalk-dim); margin-bottom:14px;">選手はいつもの登録メンバーで始まります。設定タブで自由に編集できます。</div>
-            <button class="bb-btn" id="bbCreateGame" style="width:100%;">この内容で作成</button>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmClearAll"){
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>全データを削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              この端末に保存されている<b>すべての試合・記録・スタッツ</b>が削除されます。<b>選手登録（背番号・名前）・STATSシートURLは残ります。</b>この操作は取り消せません。大事な記録は先にスプレッドシートへコピーしておいてください。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelClearAll" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmClearAll" style="flex:1;">すべて削除する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmSendSheet"){
-      const over = meta.roster.length > PLAYER_ROWS;
-      const previewName = computeGameSheetName();
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>この試合のシートを作成しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
-              「${esc(TEMPLATE_SHEET_NAME)}」をコピーして、シート名「<b>${esc(previewName)}</b>」を作成し（同名のシートが既にある場合はそのシートを使います）、試合日時・試合名称・対戦相手・試合会場・相手スコアと、①②の対象範囲（C10:G36 / K10:L36）を書き込みます。同名シートに既に入力済みの内容があっても<b>まるごと上書き</b>されます。この操作は取り消せません。${over ? `<br>選手が${PLAYER_ROWS}人を超えているため、先頭${PLAYER_ROWS}人分のみ反映されます。` : ""}
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelSendSheet" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmSendSheet" style="flex:1;">作成して一括入力する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmUpdateTotals"){
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>集計を更新しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px; line-height:1.6;">
-              TOTALシートの集計（勝敗・個人成績など）を、現在の各試合シートの内容をもとに再計算し、数値として書き込み直します。何度でも安全に実行できます。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelUpdateTotals" style="flex:1;">キャンセル</button>
-              <button class="bb-btn" id="bbConfirmUpdateTotals" style="flex:1;">更新する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmClearSheetUrl"){
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>STATSシートのURLをクリアしますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              保存されているURLが空欄になります。「③ シートを開く」が使えなくなります。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelClearSheetUrl" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmClearSheetUrl" style="flex:1;">クリアする</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmBulkImport"){
-      const parsed = parseRosterLines(modal.text);
-      const preview = parsed.slice(0, 6).map(p => `#${esc(p.number)} ${esc(p.name)}`).join("、") + (parsed.length > 6 ? ` 他${parsed.length-6}名` : "");
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>選手一覧を置き換えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              現在の選手登録（${meta.roster.length}名）を、貼り付けた${parsed.length}名に<b>丸ごと置き換えます</b>。この操作は取り消せません。<br/><br/>
-              ${parsed.length ? esc(preview) : '<span style="color:var(--whistle);">有効な行が見つかりませんでした</span>'}
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelBulkImport" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmBulkImport" style="flex:1;" ${parsed.length?"":"disabled"}>置き換える</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmDeleteLog"){
-      const e = evState.events.find(ev=>ev.id===modal.id);
-      const p = e ? playerName(e.playerId) : null;
-      const label = e ? `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}` : "この記録";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>この記録を削除しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この操作は取り消せません。</div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelDeleteLog" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmDeleteLog" style="flex:1;">削除する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmEditLog"){
-      const e = evState.events.find(ev=>ev.id===modal.id);
-      if(!e) return "";
-      const p = playerName(e.playerId);
-      const context = `${e.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(e))}`;
-      let fromLabel, toLabel, heading;
-      if(modal.field === "playerId"){
-        const newP = playerName(modal.value);
-        heading = "選手を変更しますか？";
-        fromLabel = `#${esc(p.number)} ${esc(p.name)}`;
-        toLabel = `#${esc(newP.number)} ${esc(newP.name)}`;
-      }else{
-        heading = "種類を変更しますか？";
-        fromLabel = esc(STAT_TYPES[e.type] ? STAT_TYPES[e.type].label : e.type);
-        toLabel = esc(STAT_TYPES[modal.value] ? STAT_TYPES[modal.value].label : modal.value);
-      }
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>${heading}</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              ${context}<br/><br/>
-              <b>${fromLabel}</b> → <b style="color:var(--gold);">${toLabel}</b> に変更します。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelEditLog" style="flex:1;">キャンセル</button>
-              <button class="bb-btn" id="bbConfirmEditLog" style="flex:1;">変更する</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmUndo"){
-      const real = evState.events.filter(e=>e.type!=="presence" && e.type!=="courtslot");
-      const last = real[real.length-1];
-      const p = last ? playerName(last.playerId) : null;
-      const label = last ? `${last.quarter}Q・#${esc(p.number)} ${esc(p.name)}・${esc(eventLabel(last))}` : "直前の記録";
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>直前の記録を戻しますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">${label}<br/>この記録が取り消されます。</div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelUndo" style="flex:1;">キャンセル</button>
-              <button class="bb-btn danger" id="bbConfirmUndo" style="flex:1;" ${last?"":"disabled"}>戻す</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    if(modal.type === "confirmReorderPositions"){
-      const order = currentDisplayOrder();
-      const onCourt = currentOnCourt();
-      const nameAt = (pos) => {
-        const slotIdx = order[pos];
-        const pid = onCourt[slotIdx];
-        if(!pid) return "空き枠";
-        const p = playerName(pid);
-        return `#${esc(p.number)} ${esc(p.name)}`;
-      };
-      return `
-        <div class="bb-modal-overlay" id="bbModalOverlay">
-          <div class="bb-modal">
-            <div class="bb-modal-head"><h3>表示位置を入れ替えますか？</h3><button class="bb-modal-close" id="bbModalClose">✕</button></div>
-            <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:14px;">
-              <b>${nameAt(modal.posA)}</b> と <b>${nameAt(modal.posB)}</b> の表示位置を入れ替えます。<br/>
-              このクオーターの見た目だけが変わります(出場データには影響しません)。
-            </div>
-            <div class="bb-row" style="gap:8px;">
-              <button class="bb-btn secondary" id="bbCancelReorderPositions" style="flex:1;">キャンセル</button>
-              <button class="bb-btn" id="bbConfirmReorderPositions" style="flex:1;">入れ替える</button>
-            </div>
-          </div>
-        </div>`;
-    }
-    return "";
+    const fn = MODAL_RENDERERS[modal.type];
+    return fn ? fn(modal) : "";
   }
 
   function renderActionBar(){
@@ -2256,7 +2313,7 @@ if (!window.storage) {
               reorderPick = null;
               vibrate(25);
               render();
-            }, 550);
+            }, LONG_PRESS_MS);
           };
           const cancelPress = ()=>{ clearTimeout(pressTimer); pressTimer = null; };
           reorderToggle.addEventListener("pointerdown", startPress);
@@ -2363,7 +2420,7 @@ if (!window.storage) {
             vibrate(25);
             modal = {type:"confirmSendSheet"};
             render();
-          }, 550);
+          }, LONG_PRESS_MS);
         };
         const cancelSendPress = ()=>{ clearTimeout(sendPressTimer); sendPressTimer = null; };
         sendBtn.addEventListener("pointerdown", startSendPress);
@@ -2388,7 +2445,7 @@ if (!window.storage) {
             vibrate(25);
             modal = {type:"confirmUpdateTotals"};
             render();
-          }, 550);
+          }, LONG_PRESS_MS);
         };
         const cancelUpdateTotalsPress = ()=>{ clearTimeout(updateTotalsPressTimer); updateTotalsPressTimer = null; };
         updateTotalsBtn.addEventListener("pointerdown", startUpdateTotalsPress);
@@ -2407,286 +2464,319 @@ if (!window.storage) {
       }
       const closeBtn = document.getElementById("bbModalClose");
       if(closeBtn) closeBtn.addEventListener("click", ()=>{ modal=null; render(); });
-
-      if(modal.type === "sub"){
-        document.querySelectorAll("[data-bench]").forEach(el=>{
-          el.addEventListener("click", ()=>{
-            const slot = modal.slot, pid = el.getAttribute("data-bench");
-            const outgoing = currentOnCourt()[slot];
-            modal = null;
-            if(selectedPlayer === outgoing) selectedPlayer = null;
-            setOnCourt(slot, pid);
-          });
-        });
-      }
-      if(modal.type === "editPlayer"){
-        const saveBtn = document.getElementById("bbEditSave");
-        if(saveBtn) saveBtn.addEventListener("click", ()=>{
-          const num = document.getElementById("bbEditNum").value;
-          const name = document.getElementById("bbEditName").value;
-          const id = modal.playerId;
-          modal = null;
-          updatePlayer(id, num, name);
-        });
-        const delBtn = document.getElementById("bbEditDelete");
-        if(delBtn) delBtn.addEventListener("click", ()=>{
-          modal = {type:"confirmDelete", playerId: modal.playerId};
-          render();
-        });
-      }
-      if(modal.type === "confirmDelete"){
-        const cancelBtn = document.getElementById("bbCancelDelete");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmDelete");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const id = modal.playerId;
-          modal = null;
-          deletePlayer(id);
-        });
-      }
-      if(modal.type === "confirmReorder"){
-        const cancelBtn = document.getElementById("bbCancelReorder");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmReorder");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const id = modal.playerId, direction = modal.direction;
-          modal = null;
-          movePlayer(id, direction);
-        });
-      }
-      if(modal.type === "confirmRemoveCourt"){
-        const cancelBtn = document.getElementById("bbCancelRemoveCourt");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmRemoveCourt");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const slot = modal.slot;
-          modal = null;
-          removeFromCourt(slot);
-        });
-      }
-      if(modal.type === "gameSwitch"){
-        document.querySelectorAll("[data-switch-game]").forEach(el=>{
-          el.addEventListener("click", ()=>{
-            const id = el.getAttribute("data-switch-game");
-            modal = null;
-            switchToGame(id);
-          });
-        });
-        document.querySelectorAll("[data-ask-delete-game]").forEach(el=>{
-          el.addEventListener("click", (e)=>{
-            e.stopPropagation();
-            modal = {type:"confirmDeleteGame", id: el.getAttribute("data-ask-delete-game")};
-            render();
-          });
-        });
-      }
-      if(modal.type === "confirmDeleteGame"){
-        const cancelBtn = document.getElementById("bbCancelDeleteGame");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
-        const confirmBtn = document.getElementById("bbConfirmDeleteGame");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const id = modal.id;
-          modal = null;
-          deleteGame(id);
-        });
-      }
-      if(modal.type === "newGame"){
-        const dateInput = document.getElementById("bbNewGameDate");
-        if(dateInput) dateInput.addEventListener("change", ()=>{
-          const newDate = dateInput.value;
-          modal = {type:"newGame", date: newDate, gameNumber: suggestedGameNumber(newDate)};
-          render();
-        });
-        const downBtn = document.getElementById("bbGameNumDown");
-        if(downBtn) downBtn.addEventListener("click", ()=>{
-          const date = modal.date || todayLocal();
-          const current = modal.gameNumber || suggestedGameNumber(date);
-          modal = {type:"newGame", date, gameNumber: stepGameNumber(current, -1, date, null)};
-          render();
-        });
-        const upBtn = document.getElementById("bbGameNumUp");
-        if(upBtn) upBtn.addEventListener("click", ()=>{
-          const date = modal.date || todayLocal();
-          const current = modal.gameNumber || suggestedGameNumber(date);
-          modal = {type:"newGame", date, gameNumber: stepGameNumber(current, 1, date, null)};
-          render();
-        });
-        const createBtn = document.getElementById("bbCreateGame");
-        if(createBtn) createBtn.addEventListener("click", ()=>{
-          const date = modal.date || todayLocal();
-          const num = modal.gameNumber || suggestedGameNumber(date);
-          modal = null;
-          createNewGame(date, num);
-        });
-      }
-      if(modal.type === "confirmClearAll"){
-        const cancelBtn = document.getElementById("bbCancelClearAll");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmClearAll");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          modal = null;
-          clearAllData();
-        });
-      }
-      if(modal.type === "confirmSendSheet"){
-        const cancelBtn = document.getElementById("bbCancelSendSheet");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmSendSheet");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          modal = null;
-          render();
-          sendToSheet();
-        });
-      }
-      if(modal.type === "confirmUpdateTotals"){
-        const cancelBtn = document.getElementById("bbCancelUpdateTotals");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmUpdateTotals");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          modal = null;
-          render();
-          updateTotals();
-        });
-      }
-      if(modal.type === "confirmClearSheetUrl"){
-        const cancelBtn = document.getElementById("bbCancelClearSheetUrl");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmClearSheetUrl");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          meta.sheetUrl = "";
-          saveMeta();
-          modal = null;
-          render();
-          toast("STATSシートのURLをクリアしました");
-        });
-      }
-      if(modal.type === "confirmBulkImport"){
-        const cancelBtn = document.getElementById("bbCancelBulkImport");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmBulkImport");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const text = modal.text;
-          modal = null;
-          bulkImportRoster(text, "replace");
-        });
-      }
-      if(modal.type === "opponent"){
-        document.querySelectorAll("[data-opp]").forEach(el=>{
-          el.addEventListener("click", ()=>{
-            addOpponentPts(Number(el.getAttribute("data-opp-q")), Number(el.getAttribute("data-opp")));
-          });
-        });
-      }
-      if(modal.type === "ft"){
-        document.querySelectorAll("[data-ft-awarded]").forEach(el=>{
-          el.addEventListener("click", ()=>{
-            modal = {type:"ft", awarded: Number(el.getAttribute("data-ft-awarded"))};
-            render();
-          });
-        });
-        document.querySelectorAll("[data-ft-made]").forEach(el=>{
-          el.addEventListener("click", ()=>{
-            const awarded = modal.awarded, made = Number(el.getAttribute("data-ft-made"));
-            modal = null;
-            addFreeThrowEvent(selectedPlayer, awarded, made);
-          });
-        });
-      }
-      if(modal.type === "manualcopy"){
-        const ta = document.getElementById("bbManualCopyArea");
-        if(ta){ ta.focus(); ta.select(); }
-        const retryBtn = document.getElementById("bbManualCopyBtn");
-        if(retryBtn) retryBtn.addEventListener("click", async ()=>{
-          const ok = await copyText(modal.text);
-          if(ok){
-            toast(`${modal.label} 用にコピーしました`);
-            modal = null;
-            render();
-          }else if(ta){
-            ta.focus(); ta.select();
-            toast("自動コピーできませんでした。手動で選択してコピーしてください");
-          }
-        });
-      }
-      if(modal.type === "log"){
-        document.querySelectorAll("[data-ask-log-del]").forEach(el=>{
-          el.addEventListener("click", ()=>{ modal = {type:"confirmDeleteLog", id: el.getAttribute("data-ask-log-del")}; render(); });
-        });
-        document.querySelectorAll("#bbModalOverlay [data-toggle-flag]").forEach(el=>{
-          el.addEventListener("click", ()=> toggleFlag(el.getAttribute("data-toggle-flag")));
-        });
-        const onlyFlaggedCheck = document.getElementById("bbOnlyFlagged");
-        if(onlyFlaggedCheck) onlyFlaggedCheck.addEventListener("change", ()=>{
-          modal = {type:"log", onlyFlagged: onlyFlaggedCheck.checked};
-          render();
-        });
-        document.querySelectorAll("[data-log-player]").forEach(el=>{
-          el.addEventListener("change", ()=>{
-            modal = {type:"confirmEditLog", id: el.getAttribute("data-log-player"), field:"playerId", value: el.value};
-            render();
-          });
-        });
-        document.querySelectorAll("[data-log-type]").forEach(el=>{
-          el.addEventListener("change", ()=>{
-            modal = {type:"confirmEditLog", id: el.getAttribute("data-log-type"), field:"type", value: el.value};
-            render();
-          });
-        });
-        document.querySelectorAll("[data-log-ft-awarded]").forEach(el=>{
-          el.addEventListener("change", ()=>{
-            const id = el.getAttribute("data-log-ft-awarded");
-            const ev = evState.events.find(e=>e.id===id);
-            const newAwarded = Number(el.value);
-            const newMade = Math.min(ev ? (ev.made||0) : 0, newAwarded);
-            editEvent(id, {awarded: newAwarded, made: newMade});
-          });
-        });
-        document.querySelectorAll("[data-log-ft-made]").forEach(el=>{
-          el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-ft-made"), {made: Number(el.value)}));
-        });
-      }
-      if(modal.type === "confirmDeleteLog"){
-        const cancelBtn = document.getElementById("bbCancelDeleteLog");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
-        const confirmBtn = document.getElementById("bbConfirmDeleteLog");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const id = modal.id;
-          modal = {type:"log"};
-          removeEvent(id);
-        });
-      }
-      if(modal.type === "confirmEditLog"){
-        const cancelBtn = document.getElementById("bbCancelEditLog");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
-        const confirmBtn = document.getElementById("bbConfirmEditLog");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          const id = modal.id, field = modal.field, value = modal.value;
-          modal = {type:"log"};
-          editEvent(id, {[field]: value});
-        });
-      }
-      if(modal.type === "confirmUndo"){
-        const cancelBtn = document.getElementById("bbCancelUndo");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmUndo");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          modal = null;
-          undoLast();
-        });
-      }
-      if(modal.type === "confirmReorderPositions"){
-        const cancelBtn = document.getElementById("bbCancelReorderPositions");
-        if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; reorderPick=null; render(); });
-        const confirmBtn = document.getElementById("bbConfirmReorderPositions");
-        if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
-          swapDisplayPositions(modal.posA, modal.posB);
-          modal = null;
-          reorderPick = null;
-          render();
-        });
-      }
+      const fn = MODAL_HANDLER_ATTACHERS[modal.type];
+      if(fn) fn(modal);
     }
   }
+
+  // ---- modal handler attachers ----
+  // One function per modal.type (mirrors MODAL_RENDERERS above), wired up via
+  // attachHandlers()'s dispatch table instead of one long if-chain.
+  // Parameter is named `m`, not `modal`, on purpose: these bodies reassign
+  // the outer `modal` variable (to close/replace the modal) — naming the
+  // parameter `modal` would shadow that and silently reassign a local
+  // instead of the real app state.
+  function attachSubModalHandlers(m){
+    document.querySelectorAll("[data-bench]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const slot = m.slot, pid = el.getAttribute("data-bench");
+        const outgoing = currentOnCourt()[slot];
+        modal = null;
+        if(selectedPlayer === outgoing) selectedPlayer = null;
+        setOnCourt(slot, pid);
+      });
+    });
+  }
+  function attachEditPlayerModalHandlers(m){
+    const saveBtn = document.getElementById("bbEditSave");
+    if(saveBtn) saveBtn.addEventListener("click", ()=>{
+      const num = document.getElementById("bbEditNum").value;
+      const name = document.getElementById("bbEditName").value;
+      const id = m.playerId;
+      modal = null;
+      updatePlayer(id, num, name);
+    });
+    const delBtn = document.getElementById("bbEditDelete");
+    if(delBtn) delBtn.addEventListener("click", ()=>{
+      modal = {type:"confirmDelete", playerId: m.playerId};
+      render();
+    });
+  }
+  function attachConfirmDeleteModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelDelete");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmDelete");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const id = m.playerId;
+      modal = null;
+      deletePlayer(id);
+    });
+  }
+  function attachConfirmReorderModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelReorder");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmReorder");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const id = m.playerId, direction = m.direction;
+      modal = null;
+      movePlayer(id, direction);
+    });
+  }
+  function attachConfirmRemoveCourtModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelRemoveCourt");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmRemoveCourt");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const slot = m.slot;
+      modal = null;
+      removeFromCourt(slot);
+    });
+  }
+  function attachGameSwitchModalHandlers(m){
+    document.querySelectorAll("[data-switch-game]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const id = el.getAttribute("data-switch-game");
+        modal = null;
+        switchToGame(id);
+      });
+    });
+    document.querySelectorAll("[data-ask-delete-game]").forEach(el=>{
+      el.addEventListener("click", (e)=>{
+        e.stopPropagation();
+        modal = {type:"confirmDeleteGame", id: el.getAttribute("data-ask-delete-game")};
+        render();
+      });
+    });
+  }
+  function attachConfirmDeleteGameModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelDeleteGame");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"gameSwitch"}; render(); });
+    const confirmBtn = document.getElementById("bbConfirmDeleteGame");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const id = m.id;
+      modal = null;
+      deleteGame(id);
+    });
+  }
+  function attachNewGameModalHandlers(m){
+    const dateInput = document.getElementById("bbNewGameDate");
+    if(dateInput) dateInput.addEventListener("change", ()=>{
+      const newDate = dateInput.value;
+      modal = {type:"newGame", date: newDate, gameNumber: suggestedGameNumber(newDate)};
+      render();
+    });
+    const downBtn = document.getElementById("bbGameNumDown");
+    if(downBtn) downBtn.addEventListener("click", ()=>{
+      const date = m.date || todayLocal();
+      const current = m.gameNumber || suggestedGameNumber(date);
+      modal = {type:"newGame", date, gameNumber: stepGameNumber(current, -1, date, null)};
+      render();
+    });
+    const upBtn = document.getElementById("bbGameNumUp");
+    if(upBtn) upBtn.addEventListener("click", ()=>{
+      const date = m.date || todayLocal();
+      const current = m.gameNumber || suggestedGameNumber(date);
+      modal = {type:"newGame", date, gameNumber: stepGameNumber(current, 1, date, null)};
+      render();
+    });
+    const createBtn = document.getElementById("bbCreateGame");
+    if(createBtn) createBtn.addEventListener("click", ()=>{
+      const date = m.date || todayLocal();
+      const num = m.gameNumber || suggestedGameNumber(date);
+      modal = null;
+      createNewGame(date, num);
+    });
+  }
+  function attachConfirmClearAllModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelClearAll");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmClearAll");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      modal = null;
+      clearAllData();
+    });
+  }
+  function attachConfirmSendSheetModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelSendSheet");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmSendSheet");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      modal = null;
+      render();
+      sendToSheet();
+    });
+  }
+  function attachConfirmUpdateTotalsModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelUpdateTotals");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmUpdateTotals");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      modal = null;
+      render();
+      updateTotals();
+    });
+  }
+  function attachConfirmClearSheetUrlModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelClearSheetUrl");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmClearSheetUrl");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      meta.sheetUrl = "";
+      saveMeta();
+      modal = null;
+      render();
+      toast("STATSシートのURLをクリアしました");
+    });
+  }
+  function attachConfirmBulkImportModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelBulkImport");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmBulkImport");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const text = m.text;
+      modal = null;
+      bulkImportRoster(text, "replace");
+    });
+  }
+  function attachOpponentModalHandlers(m){
+    document.querySelectorAll("[data-opp]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        addOpponentPts(Number(el.getAttribute("data-opp-q")), Number(el.getAttribute("data-opp")));
+      });
+    });
+  }
+  function attachFtModalHandlers(m){
+    document.querySelectorAll("[data-ft-awarded]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        modal = {type:"ft", awarded: Number(el.getAttribute("data-ft-awarded"))};
+        render();
+      });
+    });
+    document.querySelectorAll("[data-ft-made]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const awarded = m.awarded, made = Number(el.getAttribute("data-ft-made"));
+        modal = null;
+        addFreeThrowEvent(selectedPlayer, awarded, made);
+      });
+    });
+  }
+  function attachManualCopyModalHandlers(m){
+    const ta = document.getElementById("bbManualCopyArea");
+    if(ta){ ta.focus(); ta.select(); }
+    const retryBtn = document.getElementById("bbManualCopyBtn");
+    if(retryBtn) retryBtn.addEventListener("click", async ()=>{
+      const ok = await copyText(m.text);
+      if(ok){
+        toast(`${m.label} 用にコピーしました`);
+        modal = null;
+        render();
+      }else if(ta){
+        ta.focus(); ta.select();
+        toast("自動コピーできませんでした。手動で選択してコピーしてください");
+      }
+    });
+  }
+  function attachLogModalHandlers(m){
+    document.querySelectorAll("[data-ask-log-del]").forEach(el=>{
+      el.addEventListener("click", ()=>{ modal = {type:"confirmDeleteLog", id: el.getAttribute("data-ask-log-del")}; render(); });
+    });
+    document.querySelectorAll("#bbModalOverlay [data-toggle-flag]").forEach(el=>{
+      el.addEventListener("click", ()=> toggleFlag(el.getAttribute("data-toggle-flag")));
+    });
+    const onlyFlaggedCheck = document.getElementById("bbOnlyFlagged");
+    if(onlyFlaggedCheck) onlyFlaggedCheck.addEventListener("change", ()=>{
+      modal = {type:"log", onlyFlagged: onlyFlaggedCheck.checked};
+      render();
+    });
+    document.querySelectorAll("[data-log-player]").forEach(el=>{
+      el.addEventListener("change", ()=>{
+        modal = {type:"confirmEditLog", id: el.getAttribute("data-log-player"), field:"playerId", value: el.value};
+        render();
+      });
+    });
+    document.querySelectorAll("[data-log-type]").forEach(el=>{
+      el.addEventListener("change", ()=>{
+        modal = {type:"confirmEditLog", id: el.getAttribute("data-log-type"), field:"type", value: el.value};
+        render();
+      });
+    });
+    document.querySelectorAll("[data-log-ft-awarded]").forEach(el=>{
+      el.addEventListener("change", ()=>{
+        const id = el.getAttribute("data-log-ft-awarded");
+        const ev = evState.events.find(e=>e.id===id);
+        const newAwarded = Number(el.value);
+        const newMade = Math.min(ev ? (ev.made||0) : 0, newAwarded);
+        editEvent(id, {awarded: newAwarded, made: newMade});
+      });
+    });
+    document.querySelectorAll("[data-log-ft-made]").forEach(el=>{
+      el.addEventListener("change", ()=> editEvent(el.getAttribute("data-log-ft-made"), {made: Number(el.value)}));
+    });
+  }
+  function attachConfirmDeleteLogModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelDeleteLog");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
+    const confirmBtn = document.getElementById("bbConfirmDeleteLog");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const id = m.id;
+      modal = {type:"log"};
+      removeEvent(id);
+    });
+  }
+  function attachConfirmEditLogModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelEditLog");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal = {type:"log"}; render(); });
+    const confirmBtn = document.getElementById("bbConfirmEditLog");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      const id = m.id, field = m.field, value = m.value;
+      modal = {type:"log"};
+      editEvent(id, {[field]: value});
+    });
+  }
+  function attachConfirmUndoModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelUndo");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmUndo");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      modal = null;
+      undoLast();
+    });
+  }
+  function attachConfirmReorderPositionsModalHandlers(m){
+    const cancelBtn = document.getElementById("bbCancelReorderPositions");
+    if(cancelBtn) cancelBtn.addEventListener("click", ()=>{ modal=null; reorderPick=null; render(); });
+    const confirmBtn = document.getElementById("bbConfirmReorderPositions");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=>{
+      swapDisplayPositions(m.posA, m.posB);
+      modal = null;
+      reorderPick = null;
+      render();
+    });
+  }
+
+  const MODAL_HANDLER_ATTACHERS = {
+    sub: attachSubModalHandlers,
+    editPlayer: attachEditPlayerModalHandlers,
+    confirmDelete: attachConfirmDeleteModalHandlers,
+    confirmReorder: attachConfirmReorderModalHandlers,
+    confirmRemoveCourt: attachConfirmRemoveCourtModalHandlers,
+    gameSwitch: attachGameSwitchModalHandlers,
+    confirmDeleteGame: attachConfirmDeleteGameModalHandlers,
+    newGame: attachNewGameModalHandlers,
+    confirmClearAll: attachConfirmClearAllModalHandlers,
+    confirmSendSheet: attachConfirmSendSheetModalHandlers,
+    confirmUpdateTotals: attachConfirmUpdateTotalsModalHandlers,
+    confirmClearSheetUrl: attachConfirmClearSheetUrlModalHandlers,
+    confirmBulkImport: attachConfirmBulkImportModalHandlers,
+    opponent: attachOpponentModalHandlers,
+    ft: attachFtModalHandlers,
+    manualcopy: attachManualCopyModalHandlers,
+    log: attachLogModalHandlers,
+    confirmDeleteLog: attachConfirmDeleteLogModalHandlers,
+    confirmEditLog: attachConfirmEditLogModalHandlers,
+    confirmUndo: attachConfirmUndoModalHandlers,
+    confirmReorderPositions: attachConfirmReorderPositionsModalHandlers
+  };
 
   // ---------- keep the screen awake while this app is open ----------
   let wakeLock = null;
