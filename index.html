@@ -408,6 +408,14 @@ if (!window.storage) {
     return TEAM_DEFAULTS[mode || teamMode].roster.map(p => ({ id:"p"+Date.now()+Math.random().toString(36).slice(2,7), number:p.number, name:p.name }));
   }
 
+  // Minimal sanity check on data loaded from storage. Guards against the
+  // specific known crash mode (a saved game whose `roster` is missing/not an
+  // array, e.g. from a partial write) by falling back to a fresh game instead
+  // of letting render() throw deep inside a `.forEach`/`.length` call on it.
+  function isValidMeta(m){
+    return !!(m && Array.isArray(m.roster));
+  }
+
   function freshMeta(date, gameNumber){
     const d = TEAM_DEFAULTS[teamMode];
     return {
@@ -536,7 +544,7 @@ if (!window.storage) {
       let m = null, ev = null;
       try{ const res = await window.storage.get(gameMetaKey(gameIndex.currentGameId), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
       try{ const res = await window.storage.get(gameEvKey(gameIndex.currentGameId), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
-      meta = m || freshMeta();
+      meta = isValidMeta(m) ? m : freshMeta();
       evState = ev || { events: [], updatedAt: 0 };
     }
     if(meta.sheetUrl === undefined) meta.sheetUrl = TEAM_DEFAULTS[teamMode].sheetUrl;
@@ -616,7 +624,7 @@ if (!window.storage) {
     let m = null, ev = null;
     try{ const res = await window.storage.get(gameMetaKey(id), false); m = res ? JSON.parse(res.value) : null; }catch(e){ m = null; }
     try{ const res = await window.storage.get(gameEvKey(id), false); ev = res ? JSON.parse(res.value) : null; }catch(e){ ev = null; }
-    meta = m || freshMeta();
+    meta = isValidMeta(m) ? m : freshMeta();
     if(meta.sheetUrl === undefined) meta.sheetUrl = TEAM_DEFAULTS[teamMode].sheetUrl;
     if(meta.teamName === "自チーム") meta.teamName = TEAM_DEFAULTS[teamMode].teamName;
     if(meta.gameNumber === undefined) meta.gameNumber = 1;
@@ -1305,7 +1313,21 @@ if (!window.storage) {
   }
 
   // ---------- rendering ----------
+  // Thin wrapper around the real rendering logic: if anything in the render
+  // path throws (most likely cause: a saved game whose data is malformed in
+  // a way isValidMeta() didn't anticipate), fall back to a minimal, dependency-
+  // free recovery screen instead of leaving the page blank/frozen with no way
+  // for the user to get back to a working state.
   function render(){
+    try{
+      renderInner();
+    }catch(err){
+      console.error("render failed", err);
+      renderCrashScreen();
+    }
+  }
+
+  function renderInner(){
     const root = document.getElementById("bbRoot");
     const app = document.getElementById("bb-app");
     if(!ready){
@@ -1316,6 +1338,66 @@ if (!window.storage) {
     if(app) app.classList.toggle("bb-fixed", tab==="game");
     root.innerHTML = renderHeader() + renderTabs() + '<div class="bb-body" id="bbBody">' + renderBody() + '</div>' + (tab==="game" ? renderActionBar() + renderLiveLogPanel() : "") + renderModal();
     attachHandlers();
+  }
+
+  // Deliberately does not call any of the normal render*/attachHandlers
+  // functions above (that's the code that just failed) — this has to work
+  // even if app state is badly corrupted, so it touches the DOM directly
+  // with static markup and a single manually-wired button.
+  function renderCrashScreen(){
+    const root = document.getElementById("bbRoot");
+    const app = document.getElementById("bb-app");
+    if(app) app.classList.remove("bb-fixed");
+    root.innerHTML = `
+      <div style="padding:60px 20px; text-align:center;">
+        <div style="font-size:15px; margin-bottom:16px; color:var(--whistle); font-weight:700;">画面の表示に失敗しました</div>
+        <div style="font-size:12px; color:var(--chalk-dim); margin-bottom:24px; line-height:1.7;">
+          保存されているデータの一部が壊れている可能性があります。<br/>
+          「リセットする」を押すと復旧できます。選手登録は可能な範囲で引き継ぎますが、<br/>
+          場合によっては選手登録も含めて最初からになることがあります。
+        </div>
+        <button class="bb-btn danger" id="bbCrashReset">リセットする</button>
+      </div>`;
+    const btn = document.getElementById("bbCrashReset");
+    if(btn) btn.addEventListener("click", recoverFromCrash);
+  }
+
+  async function recoverFromCrash(){
+    // Best-effort: try to salvage the roster/sheetUrl from whatever `meta`
+    // currently holds. If reading it throws too, fall through to full
+    // factory-default recovery rather than let the recovery path itself crash.
+    let preservedRoster = [];
+    let preservedSheetUrl = null;
+    try{
+      if(meta && Array.isArray(meta.roster)) preservedRoster = JSON.parse(JSON.stringify(meta.roster));
+      if(meta && meta.sheetUrl) preservedSheetUrl = meta.sheetUrl;
+    }catch(e){ /* ignore — proceed with factory defaults */ }
+
+    try{
+      const games = (gameIndex && Array.isArray(gameIndex.games)) ? gameIndex.games : [];
+      for(const g of games){
+        try{ await window.storage.delete(gameMetaKey(g.id), false); }catch(e){ /* ignore */ }
+        try{ await window.storage.delete(gameEvKey(g.id), false); }catch(e){ /* ignore */ }
+      }
+      try{ await window.storage.delete(indexKey(), false); }catch(e){ /* ignore */ }
+    }catch(e){ /* gameIndex itself was unusable — nothing more to clean up */ }
+
+    const id = newGameId();
+    meta = freshMeta();
+    meta.roster = preservedRoster.length ? preservedRoster : makeDefaultRoster();
+    if(preservedSheetUrl) meta.sheetUrl = preservedSheetUrl;
+    evState = { events: [], updatedAt: 0 };
+    gameIndex = { currentGameId: id, games: [] };
+    syncIndexEntry();
+    selectedPlayer = null;
+    modal = null;
+    try{ await window.storage.set(gameMetaKey(id), JSON.stringify(meta), false); }catch(e){ console.error(e); }
+    try{ await window.storage.set(gameEvKey(id), JSON.stringify(evState), false); }catch(e){ console.error(e); }
+    await saveIndex();
+    ready = true;
+    tab = "setup";
+    render();
+    toast(preservedRoster.length ? "復旧しました（選手登録は引き継がれています）" : "復旧しました（選手登録も含めて初期状態に戻りました）");
   }
 
   function renderHeader(){
